@@ -1,0 +1,15 @@
+services:
+  fntv-douban-sync:
+    build: .
+    container_name: fntv-douban-sync
+    ports:
+      - "58080:5000"
+    volumes:
+      # 只读挂载飞牛影视数据库目录（根据实际部署路径修改）
+      - /path/to/fntv/database:/fntv-db:ro
+      # 持久化同步状态
+      - ./sync_state:/app/sync_state
+    environment:
+      - TZ=Asia/Shanghai
+      - FNTV_DB_PATH=/fntv-db/trimmedia.db
+    restart: unless-stopped

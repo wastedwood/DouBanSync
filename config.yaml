@@ -1,0 +1,11 @@
+# 飞牛数据库路径（可通过环境变量 FNTV_DB_PATH 覆盖）
+fntv_db_path: /fntv-db/trimmedia.db
+
+# 同步间隔（小时），默认每天一次
+sync_interval_hours: 24
+
+# 播放百分比阈值（低于此值的播放记录将被跳过，0 为不限制）
+watch_threshold_percent: 90
+
+# 豆瓣标记默认仅自己可见
+private: true

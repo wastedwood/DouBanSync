@@ -1,0 +1,21 @@
+# Runtime data
+sync_state/
+
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# Environment
+.env
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docker
+.dockerignore
