@@ -5,6 +5,7 @@ import sqlite3
 import time
 import logging
 import shutil
+import tempfile
 from enum import Enum
 from pathlib import Path
 
@@ -26,7 +27,9 @@ class FntvDb:
 
     def __init__(self, db_path: str):
         self._src_path = Path(db_path)
-        self._tmp_path = self._src_path.with_name(f"{self._src_path.stem}_tmp.db")
+        tmp_dir = Path(tempfile.gettempdir())
+        tmp_name = f"{self._src_path.stem}_tmp.db"
+        self._tmp_path = tmp_dir / tmp_name
         self._lock = time.monotonic
         self._last_copy = 0.0
 

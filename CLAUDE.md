@@ -12,6 +12,7 @@ DouBanSync/
 │   ├── __init__.py         # Flask 应用工厂 + APScheduler 启动
 │   ├── __main__.py         # 入口点 (python -m app)
 │   ├── config.py           # 配置管理器（YAML + runtime_config 两级）
+│   ├── cookiecloud_client.py # CookieCloud 客户端（拉取 + AES-CBC 解密）
 │   ├── douban_client.py    # 豆瓣非官方 API 封装（Cookie 认证 + 搜索 + 标记）
 │   ├── event_bus.py        # 线程安全事件总线（SSE 实时日志用）
 │   ├── fntv_db.py          # 飞牛影视 SQLite 只读访问层
@@ -43,9 +44,9 @@ routes.py (Flask Blueprint)
    ↓
 sync_engine.py  ←  event_bus.py (实时推送)
    ↓        ↓
-fntv_db.py  douban_client.py
-   ↓        ↓
-FNTV SQLite  豆瓣非官方 API
+fntv_db.py  douban_client.py  ←  cookiecloud_client.py (可选)
+   ↓        ↓                     ↓
+FNTV SQLite  豆瓣非官方 API      CookieCloud 服务器
 ```
 
 状态持久化通过 sync_store.py → SQLite (WAL 模式)。
@@ -53,9 +54,10 @@ FNTV SQLite  豆瓣非官方 API
 ## 关键约定
 
 ### 同步流程
-1. 播放百分比阈值过滤 ← **新增**
-2. 分类（电影 / 剧集），剧集优先走标准层级，回退智能跨季推断 ← **新增**
-3. 影分组处理：搜索豆瓣 → 标记状态
+0. CookieCloud 自动拉取（如配置）刷新 Cookie
+1. 播放百分比阈值过滤
+2. 分类（电影 / 剧集），剧集优先走标准层级，回退智能跨季推断
+3. 搜索豆瓣 → 标记状态
 4. 更新 last_sync_time
 
 ### 电视剧状态机
@@ -84,6 +86,9 @@ API：
 - `GET /api/fntv/users` — 用户列表
 - `POST /api/fntv/test-db` — 数据库验证
 - `POST /api/douban/check-cookie` — Cookie 验证
+- `GET /api/config` — 获取当前配置（JSON）
+- `POST /api/cookiecloud/test` — 测试 CookieCloud 连接
+- `POST /api/cookiecloud/sync` — 从 CookieCloud 同步 Cookie
 - `GET /api/stats` — 同步统计
 
 ### 环境变量

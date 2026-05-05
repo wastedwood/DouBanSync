@@ -5,8 +5,10 @@ services:
     ports:
       - "58080:5000"
     volumes:
-      # 只读挂载飞牛影视数据库目录（根据实际部署路径修改）
-      - /path/to/fntv/database:/fntv-db:ro
+      # 只读挂载飞牛影视数据库（根据实际路径修改）
+      # FNOS 常见路径：/vol1/@apps/trimmedia/trimmedia.db
+      # 也可在部署后通过 Web UI 配置页面修改
+      - /vol1/@apps/trimmedia/trimmedia.db:/fntv-db/trimmedia.db:ro
       # 持久化同步状态
       - ./sync_state:/app/sync_state
     environment:

@@ -60,7 +60,7 @@ def _start_scheduler(app: Flask, cfg: Config, store: SyncStore, engine: SyncEngi
     def sync_job():
         with app.app_context():
             user_guid = cfg.selected_user
-            cookie = cfg.douban_cookie
+            cookie = cfg.get_effective_cookie()  # 优先从 CookieCloud 拉取
             if not user_guid or not cookie or not engine:
                 logger.info("定时同步跳过：配置不完整")
                 return

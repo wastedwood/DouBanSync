@@ -163,5 +163,9 @@ class DoubanClient:
         """验证 cookie 是否有效"""
         if not self._ck:
             return False
+        # 先访问首页刷新 ck，建立会话，避免触发验证码
+        self._refresh_ck()
+        if not self._ck:
+            return False
         _, sid = self.search_subject("黑客帝国")
         return sid is not None
