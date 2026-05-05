@@ -26,26 +26,28 @@
 
 ### 步骤
 
-1. 克隆项目，编辑 `docker-compose.yml`，修改 volumes 中的数据库路径：
+1. 将项目文件（`app/`、`Dockerfile`、`docker-compose.yml`、`requirements.txt`、`config.yaml`、`.dockerignore`）放到部署目录，编辑 `docker-compose.yml`，修改 volumes 中的数据库路径
 
 ```yaml
 volumes:
-  # 飞牛影视数据库目录（只读），根据实际路径修改
-  - /path/to/fntv/database:/fntv-db:ro
+  # 飞牛影视数据库文件（只读），根据实际路径修改
+  - /vol1/@apps/trimmedia/trimmedia.db:/fntv-db/trimmedia.db:ro
+  # 持久化同步状态
+  - ./sync_state:/app/sync_state
 ```
 
-> 飞牛影视数据库通常位于飞牛 OS 的 `/usr/local/apps/@appdata/trim.media/database/trimmedia.db`
+> 飞牛影视数据库通常位于飞牛 OS 的 `/usr/local/apps/@appdata/trim.media/database/trimmedia.db`，`/vol1/@apps/trimmedia/trimmedia.db` 是其符号链接
 
-2. 启动容器：
+2. 构建并启动容器：
 
 ```bash
-docker-compose up -d
+docker compose up -d --build
 ```
 
 3. 打开 `http://<你的IP>:58080` 进入配置页
 4. 填写：
-   - FNTV 数据库路径（容器内路径：`/fntv-db/trimmedia.db`）
-   - 豆瓣 Cookie（见下方指南）
+   - FNTV 数据库路径（容器内路径：`/fntv-db/trimmedia.db`，挂载正确则无需修改）
+   - 豆瓣 Cookie（见下方指南）或配置 CookieCloud 自动获取
    - 选择同步用户
 5. 点击"保存配置"，返回状态页点击"立即同步"——实时日志面板会同步显示进度
 
@@ -63,7 +65,10 @@ docker-compose up -d
 |------|------|
 | FNTV 数据库路径 | 容器内数据库路径，默认 `/fntv-db/trimmedia.db` |
 | 同步用户 | 选择要同步哪位飞牛用户的观看记录 |
-| 豆瓣 Cookie | 浏览器提取的完整 Cookie 字符串 |
+| 豆瓣 Cookie | 浏览器提取的完整 Cookie 字符串（手动模式） |
+| CookieCloud 地址 | CookieCloud 服务器地址（自动拉取模式） |
+| CookieCloud UUID | CookieCloud 用户标识 |
+| CookieCloud Key | CookieCloud 加密密钥 |
 | 同步间隔 | 默认 24 小时，可 1~168 小时 |
 | 播放阈值 | 超过此百分比才算已看（默认 90%，0 为不限制） |
 | 仅自己可见 | 豆瓣标记是否仅自己可见 |

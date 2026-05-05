@@ -218,6 +218,12 @@ class FntvDb:
         """验证数据库可读且是有效的 FNTV SQLite 库"""
         if not self._src_path.exists():
             return False, f"文件不存在: {self._src_path}"
+        if self._src_path.is_dir():
+            return False, (
+                f"路径是目录而非文件: {self._src_path}\n"
+                "Docker volume 挂载时，若宿主机源文件不存在，Docker 会自动创建同名目录。"
+                "请检查宿主机路径是否正确，确保文件存在。"
+            )
         if not os.access(str(self._src_path), os.R_OK):
             return False, "文件不可读（权限问题）"
         try:

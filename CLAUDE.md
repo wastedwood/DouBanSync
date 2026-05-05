@@ -28,6 +28,7 @@ DouBanSync/
 ├── sync_state/             # 运行时数据（由应用创建）
 │   └── sync_state.db       # SQLite: 状态表 + 日志表 + config 表
 ├── config.yaml             # 默认配置（可被运行时配置覆盖）
+├── .dockerignore            # Docker 构建上下文排除规则
 ├── docker-compose.yml      # Docker 编排
 ├── Dockerfile              # python:3.13-alpine 构建
 ├── requirements.txt        # pip 依赖

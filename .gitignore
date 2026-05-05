@@ -9,6 +9,9 @@ __pycache__/
 .env
 .venv/
 
+# Claude Code
+.claude/
+
 # IDE
 .idea/
 .vscode/
