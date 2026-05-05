@@ -4,6 +4,13 @@ fntv_db_path: /fntv-db/trimmedia.db
 # 同步间隔（小时），默认每天一次
 sync_interval_hours: 24
 
+# 同步模式：interval（间隔）或 cron（Cron 表达式）
+sync_mode: interval
+
+# Cron 表达式（sync_mode=cron 时生效），格式：分 时 日 月 周
+# 默认每天凌晨3点
+sync_cron: "0 3 * * *"
+
 # 播放百分比阈值（低于此值的播放记录将被跳过，0 为不限制）
 watch_threshold_percent: 90
 

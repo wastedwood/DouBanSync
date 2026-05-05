@@ -44,34 +44,6 @@
     <div class="card p-3 mb-3">
         <h5>豆瓣帐号</h5>
 
-        <!-- CookieCloud 自动同步 -->
-        <div class="mb-3 p-3 bg-light rounded border">
-            <h6 class="d-flex align-items-center gap-2 mb-2">
-                <span class="badge bg-info">可选</span>
-                CookieCloud 自动同步
-                <span class="text-muted small fw-normal">（配置后每次同步前自动拉取最新 Cookie）</span>
-            </h6>
-            <div class="row g-2 mb-2">
-                <div class="col-md-4">
-                    <label class="form-label small">服务器地址</label>
-                    <input type="text" class="form-control form-control-sm" name="cookiecloud_url" value="{{ config.cookiecloud_url }}" placeholder="http://192.168.1.100:8088">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label small">用户 UUID</label>
-                    <input type="text" class="form-control form-control-sm" name="cookiecloud_uuid" value="{{ config.cookiecloud_uuid }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label small">API Key</label>
-                    <input type="password" class="form-control form-control-sm" name="cookiecloud_key" value="{{ config.cookiecloud_key }}" placeholder="加密密钥">
-                </div>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" class="btn btn-outline-info btn-sm" id="btn-test-cookiecloud">测试连接</button>
-                <button type="button" class="btn btn-outline-primary btn-sm" id="btn-sync-cookiecloud">从 CookieCloud 同步</button>
-                <span id="cookiecloud-status" class="ms-2 small"></span>
-            </div>
-        </div>
-
         <!-- 手动 Cookie -->
         <div class="mb-3">
             <label class="form-label">或手动输入豆瓣 Cookie</label>
@@ -86,16 +58,137 @@
         </div>
     </div>
 
+    <!-- 同步计划 -->
+    <div class="card p-3 mb-3">
+        <h5>同步计划</h5>
+
+        <!-- 模式切换 -->
+        <div class="mb-3">
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="sync_mode" value="interval" id="mode_interval"
+                       {% if config.sync_mode == 'interval' %}checked{% endif %}>
+                <label class="form-check-label" for="mode_interval">间隔模式</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="sync_mode" value="cron" id="mode_cron"
+                       {% if config.sync_mode == 'cron' %}checked{% endif %}>
+                <label class="form-check-label" for="mode_cron">定时模式（Cron）</label>
+            </div>
+        </div>
+
+        <!-- 间隔配置 -->
+        <div id="interval-config" {% if config.sync_mode == 'cron' %}style="display:none"{% endif %}>
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <label class="form-label mb-0">每</label>
+                </div>
+                <div class="col-auto">
+                    <input type="number" class="form-control" name="sync_interval_hours"
+                           value="{{ config.sync_interval_hours }}" min="1" max="168" style="width:80px">
+                </div>
+                <div class="col-auto">
+                    <span class="form-label mb-0">小时执行一次</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cron 配置 -->
+        <div id="cron-config" {% if config.sync_mode != 'cron' %}style="display:none"{% endif %}>
+
+            <!-- 快速预设 -->
+            <div class="mb-3">
+                <label class="form-label small text-muted">快速预设</label>
+                <div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 3 * * *')">每天 03:00</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * *')">每天 08:00</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 22 * * *')">每天 22:00</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * 1')">每周一 08:00</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * 1,3,5')">周一三五 08:00</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 3 1 * *')">每月1日 03:00</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 0 1 1 *')">每年1月1日 00:00</button>
+                </div>
+            </div>
+
+            <!-- 构建器 -->
+            <div class="row g-2 align-items-center mb-2">
+                <div class="col-auto">
+                    <select class="form-select" id="cron_freq" onchange="updateCronUI()" style="width:auto">
+                        <option value="daily">每天</option>
+                        <option value="weekly">每周</option>
+                        <option value="monthly">每月</option>
+                        <option value="yearly">每年</option>
+                        <option value="custom">自定义</option>
+                    </select>
+                </div>
+
+                <div class="col-auto" id="cron_time_group">
+                    <select class="form-select d-inline-block" id="cron_hour" onchange="generateCron()" style="width:80px"></select>
+                    <span class="mx-1">:</span>
+                    <select class="form-select d-inline-block" id="cron_minute" onchange="generateCron()" style="width:80px"></select>
+                </div>
+
+                <div class="col-auto" id="cron_dow_group" style="display:none">
+                    <span class="text-muted small me-2">星期</span>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_1" value="1" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_1">一</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_2" value="2" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_2">二</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_3" value="3" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_3">三</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_4" value="4" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_4">四</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_5" value="5" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_5">五</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_6" value="6" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_6">六</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="dow_0" value="0" onchange="generateCron()">
+                        <label class="form-check-label small" for="dow_0">日</label>
+                    </div>
+                </div>
+
+                <div class="col-auto" id="cron_dom_group" style="display:none">
+                    <span class="text-muted small me-1">每月的</span>
+                    <select class="form-select d-inline-block" id="cron_dom" onchange="generateCron()" style="width:80px"></select>
+                    <span class="ms-1">日</span>
+                </div>
+
+                <div class="col-auto" id="cron_month_group" style="display:none">
+                    <select class="form-select d-inline-block" id="cron_month" onchange="generateCron()" style="width:80px"></select>
+                </div>
+
+                <div class="col-auto" id="cron_custom_group" style="display:none">
+                    <input type="text" class="form-control" id="cron_raw" placeholder="分 时 日 月 周，如 30 6 * * *" oninput="generateCron()" style="width:260px">
+                </div>
+            </div>
+
+            <!-- 表达式预览 -->
+            <div class="p-2 bg-light rounded">
+                <span class="text-muted small">Cron：</span>
+                <code id="cron_expr_display">{{ config.sync_cron }}</code>
+                <input type="hidden" name="sync_cron" id="cron_expr" value="{{ config.sync_cron }}">
+                <span class="ms-3 text-success" id="cron_preview"></span>
+            </div>
+        </div>
+    </div>
+
     <!-- 同步设置 -->
     <div class="card p-3 mb-3">
-        <h5>同步设置</h5>
+        <h5>同步规则</h5>
         <div class="row">
-            <div class="col-md-4 mb-3">
-                <label class="form-label">同步间隔（小时）</label>
-                <input type="number" class="form-control" name="sync_interval_hours" value="{{ config.sync_interval_hours }}" min="1" max="168">
-                <div class="text-muted small">默认 24 小时</div>
-            </div>
-            <div class="col-md-4 mb-3">
+            <div class="col-md-6 mb-3">
                 <label class="form-label">播放阈值（%）</label>
                 <div class="input-group">
                     <input type="number" class="form-control" name="watch_threshold_percent" value="{{ config.watch_threshold_percent }}" min="0" max="100">
@@ -103,7 +196,7 @@
                 </div>
                 <div class="text-muted small">超过此百分比才算已看（0 为不限制）</div>
             </div>
-            <div class="col-md-4 mb-3">
+            <div class="col-md-6 mb-3">
                 <div class="form-check mt-4">
                     <input class="form-check-input" type="checkbox" name="private" id="private" {% if config.private %}checked{% endif %}>
                     <label class="form-check-label" for="private">豆瓣标记仅自己可见</label>
@@ -118,7 +211,158 @@
 
 {% block scripts %}
 <script>
-// 测试数据库连接
+// ── 模式切换 ──────────────────────────────────
+document.querySelectorAll('input[name="sync_mode"]').forEach(r => {
+    r.addEventListener('change', function() {
+        const isCron = this.value === 'cron';
+        document.getElementById('interval-config').style.display = isCron ? 'none' : '';
+        document.getElementById('cron-config').style.display = isCron ? '' : 'none';
+        if (isCron) generateCron();
+    });
+});
+
+// ── Cron 构建器 ──────────────────────────────
+function populateSelect(id, start, end, pad = true) {
+    const sel = document.getElementById(id);
+    for (let i = start; i <= end; i++) {
+        const v = pad ? String(i).padStart(2, '0') : String(i);
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = pad ? v : (v + '月');
+        sel.appendChild(opt);
+    }
+}
+populateSelect('cron_hour', 0, 23);
+populateSelect('cron_minute', 0, 59);
+// 日 (1-31)
+for (let i = 1; i <= 31; i++) {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = i + '日';
+    document.getElementById('cron_dom').appendChild(opt);
+}
+// 月 (1-12)
+for (let i = 1; i <= 12; i++) {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = i + '月';
+    document.getElementById('cron_month').appendChild(opt);
+}
+
+function describeCron(expr) {
+    const parts = expr.trim().split(/\s+/);
+    if (parts.length !== 5) return '无效表达式';
+    const [min, hour, dom, month, dow] = parts;
+    const isSimple = /^\d+$/.test(min) && /^\d+$/.test(hour);
+    if (!isSimple) return '';
+    if (dom === '*' && month === '*' && dow === '*')
+        return '→ 每天 ' + hour.padStart(2,'0') + ':' + min.padStart(2,'0');
+    if (dom === '*' && month === '*' && /^[\d,]+$/.test(dow)) {
+        const days = {0:'日',1:'一',2:'二',3:'三',4:'四',5:'五',6:'六',7:'日'};
+        const names = dow.split(',').map(d => '周' + (days[d] || d)).join('、');
+        return '→ 每' + names + ' ' + hour.padStart(2,'0') + ':' + min.padStart(2,'0');
+    }
+    if (/^\d+$/.test(dom) && month === '*' && dow === '*')
+        return '→ 每月' + dom + '日 ' + hour.padStart(2,'0') + ':' + min.padStart(2,'0');
+    if (/^\d+$/.test(dom) && /^\d+$/.test(month) && dow === '*')
+        return '→ 每年' + month + '月' + dom + '日 ' + hour.padStart(2,'0') + ':' + min.padStart(2,'0');
+    return '';
+}
+
+function generateCron() {
+    const freq = document.getElementById('cron_freq').value;
+    const hour = document.getElementById('cron_hour').value.padStart(2, '0');
+    const minute = document.getElementById('cron_minute').value.padStart(2, '0');
+    let cron = '';
+    switch (freq) {
+        case 'daily':
+            cron = minute + ' ' + hour + ' * * *';
+            break;
+        case 'weekly': {
+            const dows = [...document.querySelectorAll('#cron_dow_group input:checked')]
+                .map(cb => cb.value).sort((a,b) => a-b).join(',');
+            if (dows) cron = minute + ' ' + hour + ' * * ' + dows;
+            break;
+        }
+        case 'monthly':
+            cron = minute + ' ' + hour + ' ' + document.getElementById('cron_dom').value + ' * *';
+            break;
+        case 'yearly':
+            cron = minute + ' ' + hour + ' ' + document.getElementById('cron_dom').value + ' ' +
+                   document.getElementById('cron_month').value + ' *';
+            break;
+        case 'custom':
+            cron = document.getElementById('cron_raw').value.trim();
+            break;
+    }
+    if (cron) {
+        document.getElementById('cron_expr').value = cron;
+        document.getElementById('cron_expr_display').textContent = cron;
+        document.getElementById('cron_preview').textContent = describeCron(cron);
+    }
+}
+
+function updateCronUI() {
+    const freq = document.getElementById('cron_freq').value;
+    document.getElementById('cron_time_group').style.display = 'none';
+    document.getElementById('cron_dow_group').style.display = 'none';
+    document.getElementById('cron_dom_group').style.display = 'none';
+    document.getElementById('cron_month_group').style.display = 'none';
+    document.getElementById('cron_custom_group').style.display = 'none';
+    if (freq === 'custom') {
+        document.getElementById('cron_custom_group').style.display = 'inline-block';
+    } else {
+        document.getElementById('cron_time_group').style.display = 'inline-block';
+        if (freq === 'weekly') document.getElementById('cron_dow_group').style.display = 'inline-block';
+        if (freq === 'monthly' || freq === 'yearly') document.getElementById('cron_dom_group').style.display = 'inline-block';
+        if (freq === 'yearly') document.getElementById('cron_month_group').style.display = 'inline-block';
+    }
+    generateCron();
+}
+
+function applyCron(expr) {
+    const parts = expr.trim().split(/\s+/);
+    if (parts.length !== 5) return;
+    const [min, hour, dom, month, dow] = parts;
+    document.getElementById('cron_hour').value = hour.padStart(2, '0');
+    document.getElementById('cron_minute').value = min.padStart(2, '0');
+
+    if (dow !== '*') {
+        document.getElementById('cron_freq').value = 'weekly';
+        document.querySelectorAll('#cron_dow_group input').forEach(cb => cb.checked = false);
+        dow.split(',').forEach(d => {
+            const cb = document.querySelector('#cron_dow_group input[value="' + d + '"]');
+            if (cb) cb.checked = true;
+        });
+    } else if (dom !== '*' && month !== '*') {
+        document.getElementById('cron_freq').value = 'yearly';
+        document.getElementById('cron_month').value = month;
+        document.getElementById('cron_dom').value = dom;
+    } else if (dom !== '*') {
+        document.getElementById('cron_freq').value = 'monthly';
+        document.getElementById('cron_dom').value = dom;
+    } else {
+        document.getElementById('cron_freq').value = 'daily';
+    }
+    updateCronUI();
+}
+
+function setPreset(expr) {
+    document.getElementById('mode_cron').checked = true;
+    document.getElementById('mode_cron').dispatchEvent(new Event('change'));
+    applyCron(expr);
+}
+
+// 页面加载时根据现有 cron 值初始化构建器
+document.addEventListener('DOMContentLoaded', function () {
+    const currentCron = '{{ config.sync_cron }}';
+    if ('{{ config.sync_mode }}' === 'cron' && currentCron) {
+        // setTimeout 确保 DOM 完全就绪
+        setTimeout(function () { applyCron(currentCron); }, 50);
+    }
+});
+
+// ── 测试数据库连接 ────────────────────────────
 document.getElementById('btn-test-db')?.addEventListener('click', async function() {
     const path = document.querySelector('input[name="fntv_db_path"]').value;
     const statusEl = document.getElementById('db-status');
@@ -132,7 +376,6 @@ document.getElementById('btn-test-db')?.addEventListener('click', async function
         const data = await resp.json();
         if (data.ok) {
             statusEl.innerHTML = '<span class="text-success">✓ 连接成功</span>';
-            // 加载用户列表
             const userResp = await fetch('/api/fntv/users?db_path=' + encodeURIComponent(path));
             const userData = await userResp.json();
             if (userData.users) {
@@ -150,7 +393,7 @@ document.getElementById('btn-test-db')?.addEventListener('click', async function
     }
 });
 
-// 验证 Cookie
+// ── 验证 Cookie ──────────────────────────────
 document.getElementById('btn-test-cookie')?.addEventListener('click', async function() {
     const cookie = document.querySelector('textarea[name="douban_cookie"]').value;
     const statusEl = document.getElementById('cookie-status');
@@ -166,63 +409,6 @@ document.getElementById('btn-test-cookie')?.addEventListener('click', async func
         statusEl.className = 'ms-2 small ' + (data.ok ? 'text-success' : 'text-danger');
     } catch (e) {
         statusEl.textContent = '✗ 请求失败';
-        statusEl.className = 'ms-2 small text-danger';
-    }
-});
-
-// 测试 CookieCloud 连接
-document.getElementById('btn-test-cookiecloud')?.addEventListener('click', async function() {
-    const url = document.querySelector('input[name="cookiecloud_url"]').value;
-    const uuid = document.querySelector('input[name="cookiecloud_uuid"]').value;
-    const key = document.querySelector('input[name="cookiecloud_key"]').value;
-    const statusEl = document.getElementById('cookiecloud-status');
-    statusEl.textContent = '连接中...';
-    statusEl.className = 'ms-2 small';
-    try {
-        const resp = await fetch('/api/cookiecloud/test', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({url: url, uuid: uuid, key: key})
-        });
-        const data = await resp.json();
-        if (data.ok) {
-            const icon = data.cookie_valid ? '✓' : '⚠';
-            const cls = data.cookie_valid ? 'text-success' : 'text-warning';
-            statusEl.textContent = icon + ' ' + data.message;
-            statusEl.className = 'ms-2 small ' + cls;
-        } else {
-            statusEl.textContent = '✗ ' + (data.error || '连接失败');
-            statusEl.className = 'ms-2 small text-danger';
-        }
-    } catch (e) {
-        statusEl.textContent = '✗ 请求失败: ' + e.message;
-        statusEl.className = 'ms-2 small text-danger';
-    }
-});
-
-// 从 CookieCloud 同步
-document.getElementById('btn-sync-cookiecloud')?.addEventListener('click', async function() {
-    const statusEl = document.getElementById('cookiecloud-status');
-    statusEl.textContent = '同步中...';
-    statusEl.className = 'ms-2 small';
-    try {
-        const resp = await fetch('/api/cookiecloud/sync', {method: 'POST'});
-        const data = await resp.json();
-        if (data.ok) {
-            statusEl.textContent = '✓ ' + data.message;
-            statusEl.className = 'ms-2 small text-success';
-            // 自动填充 cookie 文本框
-            const cfgResp = await fetch('/api/config');
-            if (cfgResp.ok) {
-                const cfg = await cfgResp.json();
-                document.querySelector('textarea[name="douban_cookie"]').value = cfg.douban_cookie || '';
-            }
-        } else {
-            statusEl.textContent = '✗ ' + (data.error || '同步失败');
-            statusEl.className = 'ms-2 small text-danger';
-        }
-    } catch (e) {
-        statusEl.textContent = '✗ 请求失败: ' + e.message;
         statusEl.className = 'ms-2 small text-danger';
     }
 });

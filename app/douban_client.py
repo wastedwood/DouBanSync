@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
+    "Chrome/126.0.0.0 Safari/537.36"
 )
 
 BASE_HEADERS = {
@@ -58,17 +58,19 @@ class DoubanClient:
         return ";".join(f"{k}={v}" for k, v in self._cookies.items())
 
     def _refresh_ck(self):
-        """向豆瓣首页请求新的 ck"""
+        """向豆瓣首页请求新的 ck（含重定向链追踪）"""
         old_ck = self._ck
         headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "www.douban.com"}
         try:
             resp = requests.get("https://www.douban.com/", headers=headers, timeout=10)
-            sc = SimpleCookie(resp.headers.get("Set-Cookie", ""))
-            for key, morsel in sc.items():
-                if key == "ck" and morsel.value and morsel.value != '"deleted"':
-                    self._ck = morsel.value
-                    self._cookies["ck"] = morsel.value
-                    return
+            # 豆瓣可能在重定向（302）过程中设置新 ck，需检查整个跳转链
+            for response in resp.history + [resp]:
+                sc = SimpleCookie(response.headers.get("Set-Cookie", ""))
+                for key, morsel in sc.items():
+                    if key == "ck" and morsel.value and morsel.value != '"deleted"':
+                        self._ck = morsel.value
+                        self._cookies["ck"] = morsel.value
+                        return
         except Exception as e:
             logger.warning("ck 刷新失败: %s", e)
         self._ck = old_ck
@@ -80,11 +82,23 @@ class DoubanClient:
         url = f"https://www.douban.com/search?cat=1002&q={requests.utils.quote(title)}"
         headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "www.douban.com"}
         try:
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.get(url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 logger.warning("豆瓣搜索失败 [%d]: %s", resp.status_code, title)
                 return None, None
-            return self._parse_search_result(resp.text)
+            # 检查是否被重定向到登录页（精确匹配域名，避免误杀）
+            if any(d in resp.url.lower() for d in ["accounts.douban.com", "passport.douban"]):
+                logger.warning("搜索被重定向到登录页，Cookie 可能已过期: %s", title)
+                return None, None
+            # 验证码/空响应拦截
+            if len(resp.text) < 500 or "captcha" in resp.text.lower():
+                logger.warning("豆瓣搜索请求被拦截(status=%d, len=%d): %s",
+                               resp.status_code, len(resp.text), title)
+                return None, None
+            result = self._parse_search_result(resp.text)
+            if result == (None, None):
+                logger.debug("搜索无结果，响应前200字符: %s", resp.text[:200].strip())
+            return result
         except Exception as e:
             logger.error("豆瓣搜索异常: %s", e)
             return None, None
@@ -92,17 +106,39 @@ class DoubanClient:
     @staticmethod
     def _parse_search_result(html: str) -> tuple[str | None, str | None]:
         from bs4 import BeautifulSoup
+        from urllib.parse import urlparse, parse_qs, unquote
         soup = BeautifulSoup(html, "lxml")
         for div in soup.find_all("div", class_="title"):
             a_tag = div.find("a")
             if not a_tag:
                 continue
             href = a_tag.get("href", "")
+            name = a_tag.get_text(strip=True)
+
+            # 格式 A：直接链接 subject/ID/
             m = re.search(r"subject/(\d+)/", href)
             if m:
-                name = a_tag.get_text(strip=True)
-                sid = m.group(1)
-                return name, sid
+                return name, m.group(1)
+
+            # 格式 B：跟踪链接 link2/?url=...subject%2FID%2F...
+            if "link2" in href or "url=" in href:
+                try:
+                    params = parse_qs(urlparse(href).query)
+                    url_param = params.get("url", [None])[0]
+                    if url_param:
+                        decoded = unquote(url_param)
+                        m = re.search(r"subject/(\d+)/", decoded)
+                        if m:
+                            return name, m.group(1)
+                except Exception:
+                    continue
+
+            # 格式 C：onclick 属性中内嵌 sid
+            onclick = a_tag.get("onclick", "")
+            m = re.search(r"sid:\s*(\d+)", onclick)
+            if m:
+                return name, m.group(1)
+
         return None, None
 
     # ── 标记状态 ─────────────────────────────────────
@@ -160,12 +196,51 @@ class DoubanClient:
         return False
 
     def check_auth(self) -> bool:
-        """验证 cookie 是否有效"""
+        """验证 cookie 是否有效（返回布尔值）"""
+        return self.check_auth_detail()["ok"]
+
+    def check_auth_detail(self) -> dict:
+        """验证 cookie 并返回详细诊断信息——访问豆瓣首页判断认证状态"""
+        if not self._cookies:
+            return {"ok": False, "reason": "cookie_format", "message": "Cookie 格式无效，请检查是否完整复制"}
         if not self._ck:
-            return False
-        # 先访问首页刷新 ck，建立会话，避免触发验证码
-        self._refresh_ck()
-        if not self._ck:
-            return False
-        _, sid = self.search_subject("黑客帝国")
-        return sid is not None
+            return {"ok": False, "reason": "no_ck", "message": "Cookie 中缺少 ck 字段，请重新从浏览器导出"}
+        if "dbcl2" not in self._cookies:
+            return {"ok": False, "reason": "no_dbcl2", "message": "Cookie 中缺少 dbcl2（登录凭证），请确认已登录豆瓣"}
+
+        cookie_val = self._cookies.get("dbcl2", "")
+        if not cookie_val:
+            return {"ok": False, "reason": "no_dbcl2",
+                    "message": "dbcl2 值为空，请重新从浏览器导出 Cookie"}
+
+        headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "www.douban.com"}
+        try:
+            resp = requests.get("https://www.douban.com/", headers=headers,
+                                timeout=15, allow_redirects=True)
+            logger.debug("豆瓣首页响应: status=%s url=%s body_len=%d",
+                         resp.status_code, resp.url, len(resp.text))
+
+            final_url = resp.url.lower()
+            if any(p in final_url for p in ["login", "accounts", "passport", "signup"]):
+                return {"ok": False, "reason": "cookie_expired",
+                        "message": "Cookie 已过期，被重定向到登录页面，请重新从浏览器导出 Cookie"}
+
+            if len(resp.text) < 500 or "captcha" in resp.text.lower():
+                return {"ok": False, "reason": "captcha_or_blocked",
+                        "message": "豆瓣返回了验证码或拦截页面，可能是服务器 IP 被限制"}
+
+            # 从 Set-Cookie 刷新 ck
+            for response in resp.history + [resp]:
+                sc = SimpleCookie(response.headers.get("Set-Cookie", ""))
+                for key, morsel in sc.items():
+                    if key == "ck" and morsel.value and morsel.value != '"deleted"':
+                        self._ck = morsel.value
+                        self._cookies["ck"] = morsel.value
+                        break
+
+            return {"ok": True, "reason": "", "message": "Cookie 有效"}
+
+        except requests.RequestException as e:
+            logger.error("豆瓣首页请求异常: %s", e)
+            return {"ok": False, "reason": "network_error",
+                    "message": f"无法连接豆瓣: {e}"}

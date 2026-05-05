@@ -54,13 +54,50 @@ def create_app() -> Flask:
     return app
 
 
+def _schedule_sync_job(scheduler: BackgroundScheduler, sync_job, cfg: Config):
+    """根据当前配置（interval / cron）添加或更新同步任务"""
+    if scheduler.get_job("douban_sync"):
+        scheduler.remove_job("douban_sync")
+
+    if cfg.sync_mode == "cron" and cfg.sync_cron:
+        parts = cfg.sync_cron.strip().split()
+        if len(parts) == 5:
+            scheduler.add_job(
+                sync_job, "cron",
+                minute=parts[0], hour=parts[1],
+                day=parts[2], month=parts[3], day_of_week=parts[4],
+                id="douban_sync", replace_existing=True,
+            )
+            logger.info("定时同步已启动 (cron): %s", cfg.sync_cron)
+            return
+
+    # 兜底：interval 模式
+    interval = max(1, cfg.sync_interval_hours)
+    scheduler.add_job(
+        sync_job, "interval",
+        hours=interval,
+        id="douban_sync", replace_existing=True,
+    )
+    logger.info("定时同步已启动，间隔 %d 小时", interval)
+
+
+def reschedule_sync_job(app: Flask):
+    """外部调用（路由保存配置后）重置定时器"""
+    scheduler = app.extensions.get("scheduler")
+    sync_job = app.extensions.get("sync_job")
+    cfg = app.extensions["config"]
+    if scheduler and sync_job and cfg:
+        _schedule_sync_job(scheduler, sync_job, cfg)
+        logger.info("定时同步已重排")
+
+
 def _start_scheduler(app: Flask, cfg: Config, store: SyncStore, engine: SyncEngine):
     """启动 APScheduler 定时同步"""
 
     def sync_job():
         with app.app_context():
             user_guid = cfg.selected_user
-            cookie = cfg.get_effective_cookie()  # 优先从 CookieCloud 拉取
+            cookie = cfg.douban_cookie
             if not user_guid or not cookie or not engine:
                 logger.info("定时同步跳过：配置不完整")
                 return
@@ -72,17 +109,7 @@ def _start_scheduler(app: Flask, cfg: Config, store: SyncStore, engine: SyncEngi
             engine.run(user_guid)
 
     scheduler = BackgroundScheduler(daemon=True)
-    interval = max(1, cfg.sync_interval_hours)
-    scheduler.add_job(
-        sync_job,
-        "interval",
-        hours=interval,
-        id="douban_sync",
-        replace_existing=True,
-        next_run_time=None,  # 启动时不自动执行，等首次触发
-    )
+    app.extensions["sync_job"] = sync_job  # 让 reschedule 函数能找到它
+    _schedule_sync_job(scheduler, sync_job, cfg)
     scheduler.start()
-    logger.info("定时同步已启动，间隔 %d 小时", interval)
-
-    # 保存引用防止 GC
     app.extensions["scheduler"] = scheduler

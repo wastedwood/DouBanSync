@@ -43,46 +43,8 @@ class Config:
     def douban_cookie(self, value: str):
         self._store.set_config("douban_cookie", value)
 
-    # ── CookieCloud ──────────────────────────────────
-
-    @property
-    def cookiecloud_url(self) -> str:
-        return self._store.get_config("cookiecloud_url", "")
-
-    @cookiecloud_url.setter
-    def cookiecloud_url(self, value: str):
-        self._store.set_config("cookiecloud_url", value)
-
-    @property
-    def cookiecloud_uuid(self) -> str:
-        return self._store.get_config("cookiecloud_uuid", "")
-
-    @cookiecloud_uuid.setter
-    def cookiecloud_uuid(self, value: str):
-        self._store.set_config("cookiecloud_uuid", value)
-
-    @property
-    def cookiecloud_key(self) -> str:
-        return self._store.get_config("cookiecloud_key", "")
-
-    @cookiecloud_key.setter
-    def cookiecloud_key(self, value: str):
-        self._store.set_config("cookiecloud_key", value)
-
     def get_effective_cookie(self) -> str:
-        """获取有效豆瓣 Cookie——优先从 CookieCloud 拉取，回退到已存储值"""
-        if self.cookiecloud_url and self.cookiecloud_uuid and self.cookiecloud_key:
-            try:
-                from app.cookiecloud_client import fetch_cookie
-                cookie_str = fetch_cookie(
-                    self.cookiecloud_url, self.cookiecloud_uuid, self.cookiecloud_key
-                )
-                if cookie_str:
-                    self.douban_cookie = cookie_str
-                    logger.info("CookieCloud 拉取成功")
-                    return cookie_str
-            except Exception as e:
-                logger.warning("CookieCloud 拉取失败: %s", e)
+        """返回已存储的豆瓣 Cookie"""
         return self.douban_cookie
 
     @property
@@ -92,6 +54,28 @@ class Config:
     @selected_user.setter
     def selected_user(self, value: str):
         self._store.set_config("selected_user_guid", value)
+
+    @property
+    def sync_mode(self) -> str:
+        val = self._store.get_config("sync_mode", "")
+        if val:
+            return val
+        return self._defaults.get("sync_mode", "interval")
+
+    @sync_mode.setter
+    def sync_mode(self, value: str):
+        self._store.set_config("sync_mode", value)
+
+    @property
+    def sync_cron(self) -> str:
+        val = self._store.get_config("sync_cron", "")
+        if val:
+            return val
+        return self._defaults.get("sync_cron", "0 3 * * *")
+
+    @sync_cron.setter
+    def sync_cron(self, value: str):
+        self._store.set_config("sync_cron", value)
 
     @property
     def sync_interval_hours(self) -> int:
@@ -130,10 +114,9 @@ class Config:
         return {
             "fntv_db_path": self.fntv_db_path,
             "douban_cookie": self.douban_cookie,
-            "cookiecloud_url": self.cookiecloud_url,
-            "cookiecloud_uuid": self.cookiecloud_uuid,
-            "cookiecloud_key": self.cookiecloud_key,
             "selected_user": self.selected_user,
+            "sync_mode": self.sync_mode,
+            "sync_cron": self.sync_cron,
             "sync_interval_hours": self.sync_interval_hours,
             "watch_threshold_percent": self.watch_threshold_percent,
             "private": self.private,

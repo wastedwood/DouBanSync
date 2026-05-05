@@ -66,10 +66,9 @@ def config_page():
     if request.method == "POST":
         cfg.fntv_db_path = request.form.get("fntv_db_path", "")
         cfg.douban_cookie = request.form.get("douban_cookie", "")
-        cfg.cookiecloud_url = request.form.get("cookiecloud_url", "")
-        cfg.cookiecloud_uuid = request.form.get("cookiecloud_uuid", "")
-        cfg.cookiecloud_key = request.form.get("cookiecloud_key", "")
         cfg.selected_user = request.form.get("selected_user", "")
+        cfg.sync_mode = request.form.get("sync_mode", "interval")
+        cfg.sync_cron = request.form.get("sync_cron", "0 3 * * *")
         try:
             hours = int(request.form.get("sync_interval_hours", 24))
             cfg.sync_interval_hours = max(1, min(168, hours))
@@ -82,6 +81,13 @@ def config_page():
             pass
         cfg.private = request.form.get("private") == "on"
         message = "配置已保存"
+        # 重排定时任务
+        try:
+            from app import reschedule_sync_job
+            from flask import current_app
+            reschedule_sync_job(current_app._get_current_object())
+        except Exception as e:
+            logger.warning("重排定时任务失败: %s", e)
 
     # 尝试连接获取用户列表
     users = []
@@ -161,8 +167,6 @@ def api_sync_run():
         return jsonify({"error": "未选择同步用户"}), 400
     if engine.is_running:
         return jsonify({"error": "同步正在进行中"}), 409
-    # 同步前尝试从 CookieCloud 刷新 cookie
-    cfg.get_effective_cookie()
     engine._cookie = cfg.douban_cookie
     run_id = engine.run(user_guid)
     return jsonify({"run_id": run_id})
@@ -208,51 +212,8 @@ def api_test_db():
 def api_check_cookie():
     cookie = request.json.get("cookie", "")
     client = DoubanClient(cookie)
-    ok = client.check_auth()
-    return jsonify({"ok": ok})
-
-
-# ── CookieCloud API ────────────────────────────────
-
-@bp.route("/api/cookiecloud/test", methods=["POST"])
-def api_cookiecloud_test():
-    """测试 CookieCloud 连接——拉取并验证豆瓣 cookie"""
-    data = request.json or {}
-    url = data.get("url", "")
-    uuid = data.get("uuid", "")
-    key = data.get("key", "")
-    if not all([url, uuid, key]):
-        return jsonify({"ok": False, "error": "请填写完整的 CookieCloud 配置"})
-    try:
-        from app.cookiecloud_client import fetch_cookie
-        cookie_str = fetch_cookie(url, uuid, key)
-        if not cookie_str:
-            return jsonify({"ok": True, "cookie_valid": False,
-                            "message": "CookieCloud 连接成功，但未找到豆瓣 Cookie"})
-        from app.douban_client import DoubanClient
-        client = DoubanClient(cookie_str)
-        valid = client.check_auth()
-        return jsonify({"ok": True, "cookie_valid": valid,
-                        "message": "Cookie 有效" if valid else "Cookie 已失效"})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
-
-
-@bp.route("/api/cookiecloud/sync", methods=["POST"])
-def api_cookiecloud_sync():
-    """从 CookieCloud 拉取并保存豆瓣 Cookie"""
-    _, _, _, cfg, _ = _get_deps()
-    if not cfg.cookiecloud_url or not cfg.cookiecloud_uuid or not cfg.cookiecloud_key:
-        return jsonify({"ok": False, "error": "CookieCloud 配置不完整"})
-    try:
-        from app.cookiecloud_client import fetch_cookie
-        cookie_str = fetch_cookie(cfg.cookiecloud_url, cfg.cookiecloud_uuid, cfg.cookiecloud_key)
-        if not cookie_str:
-            return jsonify({"ok": False, "error": "未从 CookieCloud 找到豆瓣 Cookie"})
-        cfg.douban_cookie = cookie_str
-        return jsonify({"ok": True, "message": "Cookie 已同步"})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
+    detail = client.check_auth_detail()
+    return jsonify(detail)
 
 
 @bp.route("/api/config")

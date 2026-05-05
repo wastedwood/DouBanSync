@@ -12,7 +12,6 @@ DouBanSync/
 │   ├── __init__.py         # Flask 应用工厂 + APScheduler 启动
 │   ├── __main__.py         # 入口点 (python -m app)
 │   ├── config.py           # 配置管理器（YAML + runtime_config 两级）
-│   ├── cookiecloud_client.py # CookieCloud 客户端（拉取 + AES-CBC 解密）
 │   ├── douban_client.py    # 豆瓣非官方 API 封装（Cookie 认证 + 搜索 + 标记）
 │   ├── event_bus.py        # 线程安全事件总线（SSE 实时日志用）
 │   ├── fntv_db.py          # 飞牛影视 SQLite 只读访问层
@@ -45,9 +44,9 @@ routes.py (Flask Blueprint)
    ↓
 sync_engine.py  ←  event_bus.py (实时推送)
    ↓        ↓
-fntv_db.py  douban_client.py  ←  cookiecloud_client.py (可选)
-   ↓        ↓                     ↓
-FNTV SQLite  豆瓣非官方 API      CookieCloud 服务器
+fntv_db.py  douban_client.py
+   ↓        ↓
+FNTV SQLite  豆瓣非官方 API
 ```
 
 状态持久化通过 sync_store.py → SQLite (WAL 模式)。
@@ -55,7 +54,6 @@ FNTV SQLite  豆瓣非官方 API      CookieCloud 服务器
 ## 关键约定
 
 ### 同步流程
-0. CookieCloud 自动拉取（如配置）刷新 Cookie
 1. 播放百分比阈值过滤
 2. 分类（电影 / 剧集），剧集优先走标准层级，回退智能跨季推断
 3. 搜索豆瓣 → 标记状态
@@ -81,15 +79,13 @@ done → 跳过幂等
 - `GET /cookie-guide` — Cookie 提取指南
 
 API：
-- `GET /api/sync/stream` — SSE 实时事件流 ← **新增**
+- `GET /api/sync/stream` — SSE 实时事件流
 - `POST /api/sync/run` — 触发同步
 - `GET /api/sync/status` — 同步状态
 - `GET /api/fntv/users` — 用户列表
 - `POST /api/fntv/test-db` — 数据库验证
 - `POST /api/douban/check-cookie` — Cookie 验证
 - `GET /api/config` — 获取当前配置（JSON）
-- `POST /api/cookiecloud/test` — 测试 CookieCloud 连接
-- `POST /api/cookiecloud/sync` — 从 CookieCloud 同步 Cookie
 - `GET /api/stats` — 同步统计
 
 ### 环境变量
@@ -108,6 +104,50 @@ API：
 
 在 `sync_engine._do_run()` 中计算 `play.position_seconds / (item.runtime_minutes * 60)`，
 低于 `watch_threshold_percent` 的跳过（runtime 缺失时不拦截）。
+
+### Cookie 处理模式
+
+参考 [MoviePilot DoubanHelper](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching)：
+- Cookie 来源：手动输入，SimpleCookie 解析
+- `_refresh_ck()` / `set_ck()` 只在 ck 缺失或 403 重试时调用，不每次验证都刷新
+- 无专门 auth 验证步骤——直接用 Cookie 操作，遇到 403 刷新 ck 后重试一次
+- 标记接口 403 → 刷新 ck → 重试一次，仍失败才返回 False
+
+### 豆瓣搜索兼容
+
+豆瓣搜索页存在多种链接格式，`_parse_search_result` 按优先级尝试：
+- 格式 A：直接链接 `subject/ID/`
+- 格式 B：跟踪链接 `link2/?url=...subject%2FID%2F...`（当前主流）
+- 格式 C：`onclick` 属性中的 `sid: ID`
+
+## 参考项目
+
+### [MoviePilot-Plugins/doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching)
+
+豆瓣同步插件的参考实现，核心文件 `DoubanHelper.py`：
+
+| 模式 | 做法 |
+|------|------|
+| Cookie 管理 | 静态 Cookie 字符串，SimpleCookie 解析 |
+| ck 刷新 | `set_ck()` GET 豆瓣首页，从 Set-Cookie 提取新 ck，只在缺失或 403 时调用 |
+| 搜索 | `get_subject_id(title)` → `/search?cat=1002` → BeautifulSoup 解析 `div.title > a` |
+| 标记 | `set_watching_status(sid, status)` → POST `/j/subject/{sid}/interest` → 403 时刷 ck 重试 |
+| 状态值 | `do`（在看）、`doing`（想看已纠正场）、`done`（看过）→ 对应 collect |
+| 代理 | 全局 `self.proxies` 参数，透传到所有 requests 调用 |
+| 死信重试 | `_wait_process` 字典持久化，每次成功同步后重试失败项 |
+
+### [fntv-record-view](https://github.com/QiaoKes/fntv-record-view)
+
+FNTV 播放记录查看器，核心文件 `main.py`：
+
+| 层面 | 做法 |
+|------|------|
+| 数据库访问 | SQLite `mode=ro` 只读连接，不挂载写权限 |
+| 层级查询 | **递归 CTE** 解析媒体树形层级，带深度限制防死循环 |
+| 播放进度 | `position / duration` 计算百分比，转为 `hh:mm:ss` 格式显示 |
+| 分页 | `LIMIT/OFFSET` 标准分页 |
+| 查询优化 | `functools.lru_cache` 或简单字典缓存减少重复查询 |
+| 安全 | 参数化查询防注入，错误日志记录不泄露路径 |
 
 ## 验证
 

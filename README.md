@@ -47,7 +47,7 @@ docker compose up -d --build
 3. 打开 `http://<你的IP>:58080` 进入配置页
 4. 填写：
    - FNTV 数据库路径（容器内路径：`/fntv-db/trimmedia.db`，挂载正确则无需修改）
-   - 豆瓣 Cookie（见下方指南）或配置 CookieCloud 自动获取
+   - 豆瓣 Cookie（见下方指南）
    - 选择同步用户
 5. 点击"保存配置"，返回状态页点击"立即同步"——实时日志面板会同步显示进度
 
@@ -65,10 +65,7 @@ docker compose up -d --build
 |------|------|
 | FNTV 数据库路径 | 容器内数据库路径，默认 `/fntv-db/trimmedia.db` |
 | 同步用户 | 选择要同步哪位飞牛用户的观看记录 |
-| 豆瓣 Cookie | 浏览器提取的完整 Cookie 字符串（手动模式） |
-| CookieCloud 地址 | CookieCloud 服务器地址（自动拉取模式） |
-| CookieCloud UUID | CookieCloud 用户标识 |
-| CookieCloud Key | CookieCloud 加密密钥 |
+| 豆瓣 Cookie | 浏览器提取的完整 Cookie 字符串 |
 | 同步间隔 | 默认 24 小时，可 1~168 小时 |
 | 播放阈值 | 超过此百分比才算已看（默认 90%，0 为不限制） |
 | 仅自己可见 | 豆瓣标记是否仅自己可见 |
