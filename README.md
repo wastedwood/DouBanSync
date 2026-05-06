@@ -79,3 +79,8 @@ python -m app
 ```
 
 访问 http://localhost:5000
+
+## 致谢
+
+- [MoviePilot-Plugins / doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching) — 豆瓣 Cookie 认证与标记接口的参考实现
+- [fntv-record-view](https://github.com/QiaoKes/fntv-record-view) — FNTV 数据库只读查询与播放记录分析的参考实现
