@@ -70,6 +70,15 @@ done → 跳过幂等
 ### 配置优先级
 环境变量 > 运行时配置（runtime_config 表） > config.yaml 默认值
 
+### 定时调度
+
+两种模式，通过 `sync_mode` 切换：
+- **interval**（间隔模式）：每 N 小时执行一次，由 `sync_interval_hours` 控制
+- **cron**（定时模式）：Cron 表达式精确控制执行时间，由 `sync_cron` 控制（格式：分 时 日 月 周）
+
+调度器在应用启动时初始化，保存配置后自动重排。实现见 `__init__.py:_schedule_sync_job()`。
+外部调用 `reschedule_sync_job(app)` 可强制重排（路由保存配置后调用）。
+
 ### 路由清单
 
 页面：

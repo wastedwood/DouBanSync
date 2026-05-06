@@ -1,5 +1,6 @@
 """同步主编排引擎——集成智能跨季、播放阈值、SSE 事件推送"""
 
+import hashlib
 import logging
 import uuid
 import threading
@@ -62,6 +63,13 @@ class SyncEngine:
             return 100.0, False  # 无法判定，默认通过
         pct = (play["position_seconds"] / (runtime * 60)) * 100
         return pct, True
+
+    @staticmethod
+    def _compute_fingerprint(plays: list[dict]) -> str:
+        """对即将处理的播放记录计算确定性指纹"""
+        sorted_plays = sorted(plays, key=lambda p: p["item_guid"])
+        parts = [f"{p['item_guid']}:{p['position_seconds']}" for p in sorted_plays]
+        return hashlib.md5("|".join(parts).encode()).hexdigest()
 
     # ── 季度搜索标签 ─────────────────────────────────
 
@@ -133,7 +141,16 @@ class SyncEngine:
             self._emit(run_id, "sync_end", success=True)
             return run_id
 
-        # 2) 分组：电影 和 电视剧单集（含智能跨季回退）
+        # 3) 指纹检查：播放记录较上次无变化则跳过豆瓣调用
+        fp = self._compute_fingerprint(plays)
+        last_fp = self._store.get_config("last_play_fingerprint", "")
+        if fp == last_fp:
+            logger.info("[%s] 播放记录较上次无变化，跳过豆瓣API调用", run_id)
+            self._log(run_id, "no_change_skip", detail="播放记录无变化")
+            self._emit(run_id, "sync_end", success=True)
+            return run_id
+
+        # 4) 分组：电影 和 电视剧单集（含智能跨季回退）
         movie_plays = []
         tv_groups = {}  # {(series_guid, season_number_or_0): {info, plays, is_inferred}}
 
@@ -181,19 +198,20 @@ class SyncEngine:
                         logger.warning("[%s] 无法获取条目层级: %s", run_id, play["item_guid"])
         conn.close()
 
-        # 3) 处理电影
+        # 5) 处理电影
         for play in movie_plays:
             self._process_movie(run_id, client, user_guid, play)
 
-        # 4) 处理电视剧分组
+        # 6) 处理电视剧分组
         for key, group in tv_groups.items():
             self._process_tv_group(run_id, client, user_guid,
                                    group["info"], group["plays"],
                                    is_inferred=group["is_inferred"])
 
-        # 更新同步时间戳
+        # 更新同步时间戳和指纹
         max_time = max(p["play_update_time"] for p in plays)
         self._store.set_config("last_sync_time", str(max_time))
+        self._store.set_config("last_play_fingerprint", fp)
 
         logger.info("[%s] 同步完成", run_id)
         self._emit(run_id, "sync_end", success=True)
