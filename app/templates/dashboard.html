@@ -117,12 +117,17 @@ function connectSSE() {
                 logCount = 0;
                 if (logCountEl) logCountEl.textContent = '0 条';
                 addLogEntry('info', '同步开始', '');
-            } else if (data.type === 'sync_complete') {
+            } else if (data.type === 'sync_end') {
                 addLogEntry('info', '同步完成', data.success ? '' : '失败');
                 const btn = document.getElementById('btn-sync');
                 if (btn) btn.disabled = false;
-                document.getElementById('sync-status').textContent = '同步完成';
-                setTimeout(() => location.reload(), 2000);
+                const statusEl = document.getElementById('sync-status');
+                if (data.success) {
+                    statusEl.textContent = '同步完成';
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    statusEl.textContent = '同步失败';
+                }
             }
         } catch(e) {}
     };
