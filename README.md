@@ -78,7 +78,8 @@ pip install -r requirements.txt
 python -m app
 ```
 
-访问 http://localhost:5000
+> 默认监听 `http://0.0.0.0:5000`。Docker 部署的访问地址是 `http://<你的IP>:58080`。
+
 
 ## 致谢
 
