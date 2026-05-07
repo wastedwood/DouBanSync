@@ -1,216 +1,260 @@
 {% extends "base.html" %}
 {% block title %}配置 - 飞牛观影同步{% endblock %}
 
+{% block breadcrumb %}<a href="/">首页</a> / <span class="current">配置</span>{% endblock %}
+
 {% block content %}
-<h4 class="mb-3">配置</h4>
+<h1 class="page-title">配置</h1>
 
 {% if message %}
-<div class="alert alert-success alert-dismissible fade show">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+<div class="alert alert-success alert-dismissible fade show alert-custom">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
 {% endif %}
 {% if error %}
-<div class="alert alert-danger alert-dismissible fade show">{{ error }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+<div class="alert alert-danger alert-dismissible fade show alert-custom">{{ error }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
 {% endif %}
 
-<form method="POST">
+<form method="POST" class="accordion-custom">
     <!-- FNTV 数据库 -->
-    <div class="card p-3 mb-3">
-        <h5>FNTV 数据库</h5>
-        <div class="mb-3">
-            <label class="form-label">数据库路径 <span class="text-muted small">（Docker 容器内路径，需通过 volume 挂载）</span></label>
-            <div class="input-group">
-                <input type="text" class="form-control" name="fntv_db_path" value="{{ config.fntv_db_path }}" placeholder="/fntv-db/trimmedia.db">
-                <button type="button" class="btn btn-outline-secondary" id="btn-test-db">测试连接</button>
+    <div class="card-custom">
+        <div class="card-header-custom" onclick="toggleCard(this)">
+            <div>
+                <span style="font-size:16px;margin-right:8px">🗄️</span>
+                <strong>FNTV 数据库</strong>
+                {% if db_ok %}
+                <span class="badge-custom" style="background:#d1fae5;color:#065f46;margin-left:8px">已连接</span>
+                {% else %}
+                <span class="badge-custom" style="background:#fee2e2;color:#991b1b;margin-left:8px">未连接</span>
+                {% endif %}
             </div>
-            <div id="db-status" class="mt-1 small">
-                {% if db_ok %}<span class="text-success">已连接</span>
-                {% elif db_error %}<span class="text-danger">{{ db_error }}</span>
-                {% else %}<span class="text-muted">未测试</span>{% endif %}
-            </div>
+            <span class="arrow open">▼</span>
         </div>
+        <div class="card-body-custom open">
+            <div class="mb-3">
+                <label class="form-label">数据库路径 <span class="text-muted small">（Docker 容器内路径，需通过 volume 挂载）</span></label>
+                <div class="input-group">
+                    <input type="text" class="form-control" name="fntv_db_path" value="{{ config.fntv_db_path }}" placeholder="/fntv-db/trimmedia.db">
+                    <button type="button" class="btn btn-outline-secondary" id="btn-test-db">测试连接</button>
+                </div>
+                <div id="db-status" class="mt-1 small">
+                    {% if db_ok %}<span class="text-success">已连接</span>
+                    {% elif db_error %}<span class="text-danger">{{ db_error }}</span>
+                    {% else %}<span class="text-muted">未测试</span>{% endif %}
+                </div>
+            </div>
 
-        <div class="mb-3">
-            <label class="form-label">同步用户</label>
-            <select class="form-select" name="selected_user">
-                <option value="">-- 请选择用户 --</option>
-                {% for u in users %}
-                <option value="{{ u.guid }}" {% if u.guid == config.selected_user %}selected{% endif %}>{{ u.username }}</option>
-                {% endfor %}
-            </select>
-            {% if not db_ok %}<div class="text-muted small mt-1">请先测试数据库连接，成功后自动加载用户列表</div>{% endif %}
+            <div class="mb-3">
+                <label class="form-label">同步用户</label>
+                <select class="form-select" name="selected_user">
+                    <option value="">-- 请选择用户 --</option>
+                    {% for u in users %}
+                    <option value="{{ u.guid }}" {% if u.guid == config.selected_user %}selected{% endif %}>{{ u.username }}</option>
+                    {% endfor %}
+                </select>
+                {% if not db_ok %}<div class="text-muted small mt-1">请先测试数据库连接，成功后自动加载用户列表</div>{% endif %}
+            </div>
         </div>
     </div>
 
-    <!-- 豆瓣帐号 -->
-    <div class="card p-3 mb-3">
-        <h5>豆瓣帐号</h5>
-
-        <!-- 手动 Cookie -->
-        <div class="mb-3">
-            <label class="form-label">或手动输入豆瓣 Cookie</label>
-            <textarea class="form-control" name="douban_cookie" rows="2" placeholder="从浏览器复制的完整 Cookie 字符串">{{ config.douban_cookie }}</textarea>
-            <div class="mt-1">
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-test-cookie">验证 Cookie</button>
-                <span id="cookie-status" class="ms-2 small"></span>
+    <!-- 豆瓣账号 -->
+    <div class="card-custom">
+        <div class="card-header-custom" onclick="toggleCard(this)">
+            <div>
+                <span style="font-size:16px;margin-right:8px">📖</span>
+                <strong>豆瓣账号</strong>
             </div>
-            <div class="text-muted small mt-1">
-                <a href="/cookie-guide" target="_blank">如何获取豆瓣 Cookie？</a>
+            <span class="arrow open">▼</span>
+        </div>
+        <div class="card-body-custom open">
+            <div class="mb-3">
+                <label class="form-label">或手动输入豆瓣 Cookie</label>
+                <textarea class="form-control" name="douban_cookie" rows="2" placeholder="从浏览器复制的完整 Cookie 字符串">{{ config.douban_cookie }}</textarea>
+                <div class="mt-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-test-cookie">验证 Cookie</button>
+                    <span id="cookie-status" class="ms-2 small"></span>
+                </div>
+                <div class="text-muted small mt-1">
+                    <a href="/cookie-guide" target="_blank">如何获取豆瓣 Cookie？</a>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- 同步计划 -->
-    <div class="card p-3 mb-3">
-        <h5>同步计划</h5>
-
-        <!-- 模式切换 -->
-        <div class="mb-3">
-            <div class="form-check form-check-inline">
-                <input class="form-check-input" type="radio" name="sync_mode" value="interval" id="mode_interval"
-                       {% if config.sync_mode == 'interval' %}checked{% endif %}>
-                <label class="form-check-label" for="mode_interval">间隔模式</label>
+    <div class="card-custom">
+        <div class="card-header-custom" onclick="toggleCard(this)">
+            <div>
+                <span style="font-size:16px;margin-right:8px">🕐</span>
+                <strong>同步计划</strong>
             </div>
-            <div class="form-check form-check-inline">
-                <input class="form-check-input" type="radio" name="sync_mode" value="cron" id="mode_cron"
-                       {% if config.sync_mode == 'cron' %}checked{% endif %}>
-                <label class="form-check-label" for="mode_cron">定时模式（Cron）</label>
-            </div>
+            <span class="arrow open">▼</span>
         </div>
-
-        <!-- 间隔配置 -->
-        <div id="interval-config" {% if config.sync_mode == 'cron' %}style="display:none"{% endif %}>
-            <div class="row align-items-center">
-                <div class="col-auto">
-                    <label class="form-label mb-0">每</label>
-                </div>
-                <div class="col-auto">
-                    <input type="number" class="form-control" name="sync_interval_hours"
-                           value="{{ config.sync_interval_hours }}" min="1" max="168" style="width:80px">
-                </div>
-                <div class="col-auto">
-                    <span class="form-label mb-0">小时执行一次</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cron 配置 -->
-        <div id="cron-config" {% if config.sync_mode != 'cron' %}style="display:none"{% endif %}>
-
-            <!-- 快速预设 -->
+        <div class="card-body-custom open">
+            <!-- 模式切换 -->
             <div class="mb-3">
-                <label class="form-label small text-muted">快速预设</label>
-                <div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 3 * * *')">每天 03:00</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * *')">每天 08:00</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 22 * * *')">每天 22:00</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * 1')">每周一 08:00</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * 1,3,5')">周一三五 08:00</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 3 1 * *')">每月1日 03:00</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 0 1 1 *')">每年1月1日 00:00</button>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="sync_mode" value="interval" id="mode_interval"
+                           {% if config.sync_mode == 'interval' %}checked{% endif %}>
+                    <label class="form-check-label" for="mode_interval">间隔模式</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="sync_mode" value="cron" id="mode_cron"
+                           {% if config.sync_mode == 'cron' %}checked{% endif %}>
+                    <label class="form-check-label" for="mode_cron">定时模式（Cron）</label>
                 </div>
             </div>
 
-            <!-- 构建器 -->
-            <div class="row g-2 align-items-center mb-2">
-                <div class="col-auto">
-                    <select class="form-select" id="cron_freq" onchange="updateCronUI()" style="width:auto">
-                        <option value="daily">每天</option>
-                        <option value="weekly">每周</option>
-                        <option value="monthly">每月</option>
-                        <option value="yearly">每年</option>
-                        <option value="custom">自定义</option>
-                    </select>
-                </div>
-
-                <div class="col-auto" id="cron_time_group">
-                    <select class="form-select d-inline-block" id="cron_hour" onchange="generateCron()" style="width:80px"></select>
-                    <span class="mx-1">:</span>
-                    <select class="form-select d-inline-block" id="cron_minute" onchange="generateCron()" style="width:80px"></select>
-                </div>
-
-                <div class="col-auto" id="cron_dow_group" style="display:none">
-                    <span class="text-muted small me-2">星期</span>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_1" value="1" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_1">一</label>
+            <!-- 间隔配置 -->
+            <div id="interval-config" {% if config.sync_mode == 'cron' %}style="display:none"{% endif %}>
+                <div class="row align-items-center">
+                    <div class="col-auto">
+                        <label class="form-label mb-0">每</label>
                     </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_2" value="2" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_2">二</label>
+                    <div class="col-auto">
+                        <input type="number" class="form-control" name="sync_interval_hours"
+                               value="{{ config.sync_interval_hours }}" min="1" max="168" style="width:80px">
                     </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_3" value="3" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_3">三</label>
+                    <div class="col-auto">
+                        <span class="form-label mb-0">小时执行一次</span>
                     </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_4" value="4" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_4">四</label>
-                    </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_5" value="5" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_5">五</label>
-                    </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_6" value="6" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_6">六</label>
-                    </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="dow_0" value="0" onchange="generateCron()">
-                        <label class="form-check-label small" for="dow_0">日</label>
-                    </div>
-                </div>
-
-                <div class="col-auto" id="cron_dom_group" style="display:none">
-                    <span class="text-muted small me-1">每月的</span>
-                    <select class="form-select d-inline-block" id="cron_dom" onchange="generateCron()" style="width:80px"></select>
-                    <span class="ms-1">日</span>
-                </div>
-
-                <div class="col-auto" id="cron_month_group" style="display:none">
-                    <select class="form-select d-inline-block" id="cron_month" onchange="generateCron()" style="width:80px"></select>
-                </div>
-
-                <div class="col-auto" id="cron_custom_group" style="display:none">
-                    <input type="text" class="form-control" id="cron_raw" placeholder="分 时 日 月 周，如 30 6 * * *" oninput="generateCron()" style="width:260px">
                 </div>
             </div>
 
-            <!-- 表达式预览 -->
-            <div class="p-2 bg-light rounded">
-                <span class="text-muted small">Cron：</span>
-                <code id="cron_expr_display">{{ config.sync_cron }}</code>
-                <input type="hidden" name="sync_cron" id="cron_expr" value="{{ config.sync_cron }}">
-                <span class="ms-3 text-success" id="cron_preview"></span>
+            <!-- Cron 配置 -->
+            <div id="cron-config" {% if config.sync_mode != 'cron' %}style="display:none"{% endif %}>
+
+                <!-- 快速预设 -->
+                <div class="mb-3">
+                    <label class="form-label small text-muted">快速预设</label>
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 3 * * *')">每天 03:00</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * *')">每天 08:00</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 22 * * *')">每天 22:00</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * 1')">每周一 08:00</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 8 * * 1,3,5')">周一三五 08:00</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 3 1 * *')">每月1日 03:00</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary m-1" onclick="setPreset('0 0 1 1 *')">每年1月1日 00:00</button>
+                    </div>
+                </div>
+
+                <!-- 构建器 -->
+                <div class="row g-2 align-items-center mb-2">
+                    <div class="col-auto">
+                        <select class="form-select" id="cron_freq" onchange="updateCronUI()" style="width:auto">
+                            <option value="daily">每天</option>
+                            <option value="weekly">每周</option>
+                            <option value="monthly">每月</option>
+                            <option value="yearly">每年</option>
+                            <option value="custom">自定义</option>
+                        </select>
+                    </div>
+
+                    <div class="col-auto" id="cron_time_group">
+                        <select class="form-select d-inline-block" id="cron_hour" onchange="generateCron()" style="width:80px"></select>
+                        <span class="mx-1">:</span>
+                        <select class="form-select d-inline-block" id="cron_minute" onchange="generateCron()" style="width:80px"></select>
+                    </div>
+
+                    <div class="col-auto" id="cron_dow_group" style="display:none">
+                        <span class="text-muted small me-2">星期</span>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_1" value="1" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_1">一</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_2" value="2" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_2">二</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_3" value="3" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_3">三</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_4" value="4" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_4">四</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_5" value="5" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_5">五</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_6" value="6" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_6">六</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="dow_0" value="0" onchange="generateCron()">
+                            <label class="form-check-label small" for="dow_0">日</label>
+                        </div>
+                    </div>
+
+                    <div class="col-auto" id="cron_dom_group" style="display:none">
+                        <span class="text-muted small me-1">每月的</span>
+                        <select class="form-select d-inline-block" id="cron_dom" onchange="generateCron()" style="width:80px"></select>
+                        <span class="ms-1">日</span>
+                    </div>
+
+                    <div class="col-auto" id="cron_month_group" style="display:none">
+                        <select class="form-select d-inline-block" id="cron_month" onchange="generateCron()" style="width:80px"></select>
+                    </div>
+
+                    <div class="col-auto" id="cron_custom_group" style="display:none">
+                        <input type="text" class="form-control" id="cron_raw" placeholder="分 时 日 月 周，如 30 6 * * *" oninput="generateCron()" style="width:260px">
+                    </div>
+                </div>
+
+                <!-- 表达式预览 -->
+                <div class="p-2 bg-light rounded">
+                    <span class="text-muted small">Cron：</span>
+                    <code id="cron_expr_display">{{ config.sync_cron }}</code>
+                    <input type="hidden" name="sync_cron" id="cron_expr" value="{{ config.sync_cron }}">
+                    <span class="ms-3 text-success" id="cron_preview"></span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- 同步设置 -->
-    <div class="card p-3 mb-3">
-        <h5>同步规则</h5>
-        <div class="row">
-            <div class="col-md-6 mb-3">
-                <label class="form-label">播放阈值（%）</label>
-                <div class="input-group">
-                    <input type="number" class="form-control" name="watch_threshold_percent" value="{{ config.watch_threshold_percent }}" min="0" max="100">
-                    <span class="input-group-text">%</span>
-                </div>
-                <div class="text-muted small">超过此百分比才算已看（0 为不限制）</div>
+    <!-- 同步规则 -->
+    <div class="card-custom">
+        <div class="card-header-custom" onclick="toggleCard(this)">
+            <div>
+                <span style="font-size:16px;margin-right:8px">⚙️</span>
+                <strong>同步规则</strong>
             </div>
-            <div class="col-md-6 mb-3">
-                <div class="form-check mt-4">
-                    <input class="form-check-input" type="checkbox" name="private" id="private" {% if config.private %}checked{% endif %}>
-                    <label class="form-check-label" for="private">豆瓣标记仅自己可见</label>
+            <span class="arrow open">▼</span>
+        </div>
+        <div class="card-body-custom open">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">播放阈值（%）</label>
+                    <div class="input-group">
+                        <input type="number" class="form-control" name="watch_threshold_percent" value="{{ config.watch_threshold_percent }}" min="0" max="100">
+                        <span class="input-group-text">%</span>
+                    </div>
+                    <div class="text-muted small">超过此百分比才算已看（0 为不限制）</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input" type="checkbox" name="private" id="private" {% if config.private %}checked{% endif %}>
+                        <label class="form-check-label" for="private">豆瓣标记仅自己可见</label>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">保存配置</button>
+    <div class="d-flex justify-content-end mt-3"><button type="submit" class="btn btn-primary px-4">保存配置</button></div>
 </form>
 {% endblock %}
 
 {% block scripts %}
 <script>
+// ── Accordion toggle ─────────────────────────
+function toggleCard(header) {
+    const body = header.nextElementSibling;
+    const arrow = header.querySelector('.arrow');
+    body.classList.toggle('open');
+    arrow.classList.toggle('open');
+}
+
 // ── 模式切换 ──────────────────────────────────
 document.querySelectorAll('input[name="sync_mode"]').forEach(r => {
     r.addEventListener('change', function() {
