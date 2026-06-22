@@ -1,87 +1,280 @@
-# 飞牛观影同步 · FNTV → Douban Sync
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Flask-2.3+-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask">
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
+</p>
 
-将飞牛影视（FNTV）的观看记录自动同步到豆瓣书影音档案。
+<h1 align="center">🎬 DouBanSync</h1>
+<h3 align="center">飞牛影视 → 豆瓣 · 观看记录自动同步工具</h3>
 
-## 功能
+<p align="center">
+  将 <strong>飞牛影视 (FNTV)</strong> 中的观看记录自动同步到 <strong>豆瓣书影音档案</strong>，
+  让每一部看过的电影和追完的剧集都不留空白。
+</p>
 
-- **自动同步** — 定时读取飞牛影视 SQLite 数据库，通过豆瓣内部 API 标记观影状态
-- **灵活调度** — 支持间隔模式（每 N 小时）和 Cron 表达式（每天/每周/每月精确到分钟）
-- **智能跨季匹配** — 自动识别飞牛扁平结构中的季度边界，正确匹配豆瓣分季条目
-- **播放阈值过滤** — 设置播放百分比门槛，避免点开就标记的误报
-- **实时日志** — 浏览器端 SSE 流式展示同步过程，每步操作实时可见
+<br>
 
-## 同步规则
+<p align="center">
+  <img src="docs/screenshot-dashboard.png" alt="状态面板截图" width="80%" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+</p>
 
-- **电影**：观看后自动标记"看过"
-- **电视剧**：首集标记"在看"，末集标记"看过"，中间集跳过
-- **智能季推断**：当飞牛缺少季度层级时，从剧集编号分布自动推断季度边界
-- **播放阈值**：低于设定百分比（默认 90%）的播放记录自动跳过
+---
 
-## 部署
+## ✨ 功能亮点
 
-### 前提
+| 特性 | 说明 |
+|------|------|
+| 🚀 **自动同步** | 定时读取飞牛影视播放记录，通过豆瓣 API 自动标记 |
+| 🎯 **智能匹配** | 电影自动匹配、电视剧自动识别季度边界，分季正确标记 |
+| 📺 **剧集状态机** | 首集 → "在看"，末集 → "看过"，中间集跳过，幂等安全 |
+| 🧹 **阈值过滤** | 播放百分比门槛，避免随手点开就标记的误报 |
+| ⏰ **灵活调度** | 间隔模式 / Cron 表达式，精确到你想要的每一分钟 |
+| 📡 **实时日志** | 浏览器端 SSE 流式展示，每一步操作清晰可见 |
+| 🐳 **一键部署** | Docker 镜像即拉即用，无需复杂环境配置 |
+| 🌐 **Web 管理** | 浏览器配置页，无需编辑任何配置文件 |
 
-- Docker + Docker Compose
-- 飞牛影视已正常运行
-- 豆瓣 Cookie（从浏览器提取）
+---
 
-### 步骤
+## 🖼️ 界面预览
 
-1. 将项目文件（`app/`、`Dockerfile`、`docker-compose.yml`、`requirements.txt`、`config.yaml`、`.dockerignore`）放到部署目录，编辑 `docker-compose.yml`，修改 volumes 中的数据库路径
+| 状态面板 | 配置页面 | 同步日志 |
+|:---:|:---:|:---:|
+| [![状态面板](docs/screenshot-dashboard.png)](docs/screenshot-dashboard.png) | [![配置页面](docs/screenshot-config.png)](docs/screenshot-config.png) | [![同步日志](docs/screenshot-history.png)](docs/screenshot-history.png) |
+| 同步状态一目了然，实时日志逐条展示 | 图形化配置，无需编辑文件 | 完整的历史记录与搜索 |
+
+---
+
+## 📋 目录
+
+- [同步规则](#-同步规则)
+- [快速开始](#-快速开始)
+  - [前提条件](#前提条件)
+  - [Docker 部署（推荐）](#docker-部署推荐)
+  - [手动部署](#手动部署)
+- [配置指南](#-配置指南)
+  - [获取豆瓣 Cookie](#获取豆瓣-cookie)
+  - [配置项一览](#配置项一览)
+- [架构概览](#-架构概览)
+- [开发指南](#-开发指南)
+- [致谢](#-致谢)
+
+---
+
+## 📖 同步规则
+
+<h3>🎬 电影</h3>
+
+观看进度达到设定阈值（默认 90%）后自动标记「看过」。
+
+<h3>📺 电视剧</h3>
+
+```
+首集 ──→ "在看"（doing）
+中间集 ──→ 跳过（不调用 API，节省配额）
+末集 ──→ "看过"（done）
+已看完才首次同步 ──→ "看过"（done）
+```
+
+<h3>🧠 智能跨季推断</h3>
+
+当飞牛影视缺少标准 `season` 层级时，系统通过分析全量 `episode_number` 分布，自动检测季度边界（数值回退 = 新季度），正确匹配豆瓣的分季条目。
+
+---
+
+## 🚀 快速开始
+
+### 前提条件
+
+- **Docker** + **Docker Compose**（推荐）
+- 飞牛影视（FNTV）已正常运行
+- 从浏览器提取的豆瓣 Cookie（见下方指南）
+
+### Docker 部署（推荐）
+
+**1. 克隆或下载项目**
+
+```bash
+git clone https://github.com/yourname/DouBanSync.git
+cd DouBanSync
+```
+
+**2. 编辑 `docker-compose.yml`**
 
 ```yaml
 volumes:
   # 飞牛影视数据库文件（只读），根据实际路径修改
   - /vol1/@apps/trimmedia/trimmedia.db:/fntv-db/trimmedia.db:ro
-  # 持久化同步状态
+  # 持久化同步状态（自动创建）
   - ./sync_state:/app/sync_state
 ```
 
-> 飞牛影视数据库通常位于飞牛 OS 的 `/usr/local/apps/@appdata/trim.media/database/trimmedia.db`，`/vol1/@apps/trimmedia/trimmedia.db` 是其符号链接
+> 飞牛影视数据库通常位于飞牛 OS 的 `/usr/local/apps/@appdata/trim.media/database/trimmedia.db`，`/vol1/@apps/trimmedia/trimmedia.db` 是其符号链接。如有权限问题，请直接挂载原路径。
 
-2. 构建并启动容器：
+**3. 构建并启动**
 
 ```bash
 docker compose up -d --build
 ```
 
-3. 打开 `http://<你的IP>:58080` 进入配置页
-4. 填写：
-   - FNTV 数据库路径（容器内路径：`/fntv-db/trimmedia.db`，挂载正确则无需修改）
-   - 豆瓣 Cookie（见下方指南）
-   - 选择同步用户
-5. 点击"保存配置"，返回状态页点击"立即同步"——实时日志面板会同步显示进度
+**4. 打开浏览器配置**
 
-### 获取豆瓣 Cookie
+访问 `http://<你的NAS-IP>:58080`，进入配置页：
 
-1. 浏览器打开 https://movie.douban.com/ 并登录
-2. 按 F12 打开开发者工具 → Network 标签
-3. 刷新页面，找到第一个 `movie.douban.com` 的 document 请求
-4. 在 Request Headers 中找到 `Cookie:` 行，右键 Copy Value
-5. 粘贴到配置页的 Cookie 输入框
+1. 确认 FNTV 数据库路径（容器内路径 `/fntv-db/trimmedia.db`，挂载正确则无需修改）
+2. 粘贴豆瓣 Cookie
+3. 选择要同步的飞牛用户
+4. 点击「保存配置」
 
-## 配置项
+**5. 触发同步**
 
-| 配置 | 说明 |
-|------|------|
-| FNTV 数据库路径 | 容器内数据库路径，默认 `/fntv-db/trimmedia.db` |
-| 同步用户 | 选择要同步哪位飞牛用户的观看记录 |
-| 豆瓣 Cookie | 浏览器提取的完整 Cookie 字符串 |
-| 同步计划 | 两种模式：间隔（每 N 小时）或定时（Cron 表达式，带可视化构建器） |
-| 播放阈值 | 超过此百分比才算已看（默认 90%，0 为不限制） |
-| 仅自己可见 | 豆瓣标记是否仅自己可见 |
+返回状态面板，点击「立即同步」——右侧实时面板会逐条展示同步过程。
 
-## 开发
+> 💡 **首次同步后**：系统会根据你设定的调度计划自动运行，无需手动干预。
+
+### 手动部署
 
 ```bash
+# 安装依赖
 pip install -r requirements.txt
+
+# 启动开发服务器
 python -m app
 ```
 
-> 默认监听 `http://0.0.0.0:5000`。Docker 部署的访问地址是 `http://<你的IP>:58080`。
+默认监听 `http://0.0.0.0:5000`。
 
+---
 
-## 致谢
+## ⚙️ 配置指南
+
+### 获取豆瓣 Cookie
+
+<details>
+<summary>📝 点击展开详细步骤</summary>
+
+1. 使用浏览器打开 [movie.douban.com](https://movie.douban.com/) 并登录你的账号
+2. 按 **F12** 打开开发者工具，切换到 **Network（网络）** 标签页
+3. 刷新页面
+4. 在请求列表中找到第一个 `movie.douban.com` 的 document 类型请求
+5. 在 **Request Headers** 中找到 `Cookie:` 这一行
+6. **右键 → Copy Value** 复制整段 Cookie 字符串
+7. 粘贴到 DouBanSync 配置页面的 Cookie 输入框中
+
+> ⚠️ 豆瓣 Cookie 有有效期，过期后需要重新提取。应用会在遇到 403 时自动尝试刷新，但长期不活跃仍需手动更新。
+</details>
+
+### 配置项一览
+
+| 配置 | 说明 | 默认值 |
+|------|------|--------|
+| **FNTV 数据库路径** | 容器内数据库文件路径 | `/fntv-db/trimmedia.db` |
+| **同步用户** | 选择要同步的飞牛用户 | — |
+| **豆瓣 Cookie** | 浏览器提取的完整 Cookie 字符串 | — |
+| **同步计划** | 间隔模式（每 N 小时）或 Cron 表达式（带可视化构建器） | 每 6 小时 |
+| **播放阈值** | 超过此百分比才算已看 | 90% |
+| **仅自己可见** | 豆瓣标记是否仅自己可见 | 否 |
+
+---
+
+## 🏗️ 架构概览
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Web UI                             │
+│           (Jinja2 + Bootstrap 5)                     │
+└──────────────────┬──────────────────────────────────┘
+                   │ HTTP / SSE
+┌──────────────────▼──────────────────────────────────┐
+│                  routes.py                           │
+│              (Flask Blueprint)                       │
+└──────────────────┬──────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────┐
+│              sync_engine.py                          │
+│         ◄── event_bus.py (SSE 实时推送)               │
+└──────┬───────────────────────────┬──────────────────┘
+       │                           │
+┌──────▼──────────┐     ┌─────────▼──────────┐
+│   fntv_db.py    │     │  douban_client.py  │
+│  (FNTV 只读层)   │     │  (豆瓣 API 封装)    │
+└──────┬──────────┘     └─────────┬──────────┘
+       │                          │
+┌──────▼──────────┐     ┌─────────▼──────────┐
+│   FNTV SQLite   │     │   豆瓣非官方 API    │
+│   （只读挂载）    │     │   (Cookie 认证)     │
+└─────────────────┘     └────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│              sync_store.py → sync_state.db          │
+│         (SQLite + WAL — 状态持久化)                    │
+└─────────────────────────────────────────────────────┘
+```
+
+### 数据流
+
+1. **调度器**触发同步 → `sync_engine` 启动
+2. 从 **FNTV SQLite** 读取增量播放记录（只读）
+3. 按规则 **分类**：电影 / 剧集
+4. **搜索豆瓣**匹配条目标题
+5. **标记状态**（在看 / 看过）
+6. 记录结果到 **sync_state.db**
+7. 全程通过 **Event Bus + SSE** 实时推送到浏览器
+
+---
+
+## 🛠️ 开发指南
+
+```bash
+# 克隆项目
+git clone https://github.com/yourname/DouBanSync.git
+cd DouBanSync
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动开发服务器
+python -m app
+```
+
+> 开发服务器默认监听 `http://0.0.0.0:5000`。
+> Docker 部署的访问地址为 `http://<你的NAS-IP>:58080`。
+
+### 项目结构
+
+```
+DouBanSync/
+├── app/                    # 应用核心
+│   ├── __init__.py         # Flask 应用工厂 + 调度器
+│   ├── __main__.py         # 入口点
+│   ├── config.py           # 配置管理
+│   ├── douban_client.py    # 豆瓣 API 封装
+│   ├── event_bus.py        # 事件总线（SSE 实时日志）
+│   ├── fntv_db.py          # 飞牛 SQLite 只读访问
+│   ├── routes.py           # Web 路由 + API 端点
+│   ├── sync_engine.py      # 同步主编排引擎
+│   ├── sync_store.py       # 同步状态持久化
+│   └── templates/          # 页面模板
+├── sync_state/             # 运行时数据
+├── config.yaml             # 默认配置
+├── docker-compose.yml      # Docker 编排
+├── Dockerfile              # 容器构建
+├── requirements.txt        # Python 依赖
+└── README.md               # 本文件
+```
+
+---
+
+## 🤝 致谢
 
 - [MoviePilot-Plugins / doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching) — 豆瓣 Cookie 认证与标记接口的参考实现
 - [fntv-record-view](https://github.com/QiaoKes/fntv-record-view) — FNTV 数据库只读查询与播放记录分析的参考实现
+- 感谢所有使用和反馈的用户 ❤️
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ for the FNTV &amp; Douban community</sub>
+  <br>
+  <sub>如果你喜欢这个项目，欢迎 ⭐️ Star 支持</sub>
+</p>
