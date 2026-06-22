@@ -235,19 +235,13 @@ def api_stats():
 
 @bp.route("/api/bark/test", methods=["POST"])
 def api_bark_test():
-    from flask import current_app
+    from app.notifier import BarkNotifier
     key = request.json.get("device_key", "")
     if not key:
         return jsonify({"ok": False, "message": "请填写 Bark Key"})
 
-    notifier = current_app.extensions.get("notifier")
-    if not notifier:
-        return jsonify({"ok": False, "message": "通知器未初始化"})
-
-    saved_key = notifier._device_key
-    notifier._device_key = key
-    ok = notifier.send("测试通知", "Bark 推送已生效 🎉", group="DouBanSync-测试")
-    notifier._device_key = saved_key
+    test_notifier = BarkNotifier(key)
+    ok = test_notifier.send("测试通知", "Bark 推送已生效", group="DouBanSync-测试")
 
     if ok:
         return jsonify({"ok": True, "message": "测试通知已发送，请查看手机"})

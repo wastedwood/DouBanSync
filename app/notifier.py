@@ -6,7 +6,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-BARK_API_URL = "https://api.day.app/push"
+BARK_API_BASE = "https://api.day.app"
 
 
 class BarkNotifier:
@@ -27,8 +27,8 @@ class BarkNotifier:
         if not self._device_key:
             return False
         try:
-            resp = requests.post(BARK_API_URL, json={
-                "device_key": self._device_key,
+            url = f"{BARK_API_BASE}/{self._device_key}"
+            resp = requests.post(url, json={
                 "title": title,
                 "body": body,
                 "group": group,
