@@ -13,6 +13,7 @@ from app.fntv_db import FntvDb
 from app.sync_engine import SyncEngine
 from app.config import Config
 from app.event_bus import EventBus
+from app.notifier import BarkNotifier
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -31,7 +32,8 @@ def create_app() -> Flask:
     cfg = Config(store)
     fntv = FntvDb(cfg.fntv_db_path) if cfg.fntv_db_path else None
     bus = EventBus()
-    engine = SyncEngine(fntv, store, cfg.douban_cookie, cfg.private, bus) if fntv else None
+    notifier = BarkNotifier(cfg.bark_key)
+    engine = SyncEngine(fntv, store, cfg.douban_cookie, cfg.private, bus, notifier) if fntv else None
 
     # 注册到 app 扩展
     app.extensions["store"] = store
@@ -39,6 +41,7 @@ def create_app() -> Flask:
     app.extensions["engine"] = engine
     app.extensions["config"] = cfg
     app.extensions["event_bus"] = bus
+    app.extensions["notifier"] = notifier
 
     # 注册蓝图
     app.register_blueprint(bp)

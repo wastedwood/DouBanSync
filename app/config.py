@@ -110,6 +110,14 @@ class Config:
     def private(self, value: bool):
         self._store.set_config("private", "true" if value else "false")
 
+    @property
+    def bark_key(self) -> str:
+        return self._store.get_config("bark_key", "")
+
+    @bark_key.setter
+    def bark_key(self, value: str):
+        self._store.set_config("bark_key", value)
+
     def to_dict(self) -> dict:
         return {
             "fntv_db_path": self.fntv_db_path,
@@ -120,4 +128,5 @@ class Config:
             "sync_interval_hours": self.sync_interval_hours,
             "watch_threshold_percent": self.watch_threshold_percent,
             "private": self.private,
+            "bark_key": self.bark_key,
         }

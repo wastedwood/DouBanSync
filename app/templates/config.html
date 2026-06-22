@@ -241,6 +241,28 @@
         </div>
     </div>
 
+    <!-- Bark 推送 -->
+    <div class="card-custom">
+        <div class="card-header-custom" onclick="toggleCard(this)">
+            <div>
+                <span style="font-size:16px;margin-right:8px">🔔</span>
+                <strong>Bark 推送（iOS）</strong>
+                <span class="text-muted small ms-2">同步完成或 Cookie 过期时发送通知到手机</span>
+            </div>
+            <span class="arrow open">▼</span>
+        </div>
+        <div class="card-body-custom open">
+            <div class="mb-3">
+                <label class="form-label">Bark Device Key</label>
+                <div class="input-group">
+                    <input type="text" class="form-control font-monospace" name="bark_key" value="{{ config.bark_key }}" placeholder="留空则禁用推送">
+                    <button type="button" class="btn btn-outline-secondary" id="btn-test-bark">测试</button>
+                </div>
+                <div id="bark-status" class="mt-1 small text-muted">从 Bark App 复制 Device Key 粘贴到这里，留空为禁用</div>
+            </div>
+        </div>
+    </div>
+
     <div class="d-flex justify-content-end mt-3"><button type="submit" class="btn btn-primary px-4">保存配置</button></div>
 </form>
 {% endblock %}
@@ -434,6 +456,32 @@ document.getElementById('btn-test-db')?.addEventListener('click', async function
         }
     } catch (e) {
         statusEl.innerHTML = '<span class="text-danger">✗ 请求失败: ' + e.message + '</span>';
+    }
+});
+
+// ── 测试 Bark ────────────────────────────────
+document.getElementById('btn-test-bark')?.addEventListener('click', async function() {
+    const key = document.querySelector('input[name="bark_key"]').value;
+    const statusEl = document.getElementById('bark-status');
+    if (!key) {
+        statusEl.textContent = '请先填写 Bark Key';
+        statusEl.className = 'mt-1 small text-danger';
+        return;
+    }
+    statusEl.textContent = '发送中...';
+    statusEl.className = 'mt-1 small text-muted';
+    try {
+        const resp = await fetch('/api/bark/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({device_key: key})
+        });
+        const data = await resp.json();
+        statusEl.textContent = data.ok ? '✓ 通知已发送，请查看手机' : '✗ ' + data.message;
+        statusEl.className = 'mt-1 small ' + (data.ok ? 'text-success' : 'text-danger');
+    } catch (e) {
+        statusEl.textContent = '✗ 请求失败: ' + e.message;
+        statusEl.className = 'mt-1 small text-danger';
     }
 });
 

@@ -21,14 +21,16 @@ class SyncEngine:
     """FNTV → 豆瓣 同步引擎"""
 
     def __init__(self, fntv: FntvDb, store: SyncStore, cookie: str,
-                 private: bool = True, event_bus=None):
+                 private: bool = True, event_bus=None, notifier=None):
         self._fntv = fntv
         self._store = store
         self._cookie = cookie
         self._private = private
         self._event_bus = event_bus
+        self._notifier = notifier
         self._lock = threading.Lock()
         self._running = False
+        self._stats = {}
 
     @property
     def is_running(self) -> bool:
@@ -93,6 +95,7 @@ class SyncEngine:
 
     def _do_run(self, user_guid: str) -> str:
         run_id = uuid.uuid4().hex[:12]
+        self._stats = {"done": 0, "doing": 0, "failed": 0, "skipped": 0}
         logger.info("[%s] 同步开始 user=%s", run_id, user_guid)
         self._emit(run_id, "sync_start")
 
@@ -101,6 +104,9 @@ class SyncEngine:
             logger.error("[%s] 豆瓣认证失败，请检查 Cookie", run_id)
             self._log(run_id, "auth_failed", detail="豆瓣 Cookie 无效")
             self._emit(run_id, "sync_end", success=False)
+            if self._notifier and self._notifier.enabled:
+                self._notifier.send("⚠️ 豆瓣同步失败", "Cookie 已过期，请在 Web 端更新",
+                                    group="DouBanSync-警报")
             return run_id
 
         last_sync = int(self._store.get_config("last_sync_time", "0"))
@@ -215,7 +221,25 @@ class SyncEngine:
 
         logger.info("[%s] 同步完成", run_id)
         self._emit(run_id, "sync_end", success=True)
+        self._send_summary()
         return run_id
+
+    # ── 通知 ────────────────────────────────────────
+
+    def _send_summary(self):
+        if not self._notifier or not self._notifier.enabled:
+            return
+        parts = []
+        if self._stats["done"]:
+            parts.append(f"看过 {self._stats['done']}")
+        if self._stats["doing"]:
+            parts.append(f"在看 {self._stats['doing']}")
+        if self._stats["failed"]:
+            parts.append(f"失败 {self._stats['failed']}")
+        if self._stats["skipped"]:
+            parts.append(f"跳过 {self._stats['skipped']}")
+        body = "、".join(parts) if parts else "无变更"
+        self._notifier.send("同步完成", body)
 
     # ── 电影 ─────────────────────────────────────────
 
@@ -227,6 +251,7 @@ class SyncEngine:
         state = self._store.get_state(user_guid, item_guid)
         if state and state["status"] == "done":
             self._log(run_id, "skip_done", item_guid, title, "电影已标记过")
+            self._stats["skipped"] += 1
             return
 
         name, sid = client.search_subject(title)
@@ -236,6 +261,7 @@ class SyncEngine:
                                      status="failed",
                                      play_update_time=play["play_update_time"])
             self._log(run_id, "error_search", item_guid, title, "豆瓣搜索无结果")
+            self._stats["failed"] += 1
             return
 
         ok = client.mark_interest(sid, "done", self._private)
@@ -246,12 +272,14 @@ class SyncEngine:
                                      play_update_time=play["play_update_time"])
             self._log(run_id, "mark_done", item_guid, title, f"豆瓣ID={sid}")
             logger.info("[%s] 电影标记看过: %s", run_id, title)
+            self._stats["done"] += 1
         else:
             self._store.upsert_state(user_guid, item_guid,
                                      media_type="movie", status="failed",
                                      play_update_time=play["play_update_time"])
             self._log(run_id, "error_api", item_guid, title,
                       f"标记失败 sid={sid}")
+            self._stats["failed"] += 1
 
     # ── 电视剧 ───────────────────────────────────────
 
@@ -284,6 +312,7 @@ class SyncEngine:
         # 幂等：已完成则跳过
         if current_status == "done":
             self._log(run_id, "skip_done", series_guid, series_title, "已标记看过")
+            self._stats["skipped"] += 1
             return
 
         # 搜索豆瓣
@@ -314,6 +343,7 @@ class SyncEngine:
                                              play_update_time=play["play_update_time"])
                 self._log(run_id, "error_search", series_guid, search_title,
                           "豆瓣搜索无结果")
+                self._stats["failed"] += 1
                 return
 
         # 决定跃迁
@@ -355,14 +385,20 @@ class SyncEngine:
                 self._log(run_id, "error_api", series_guid, series_title,
                           f"标记{interest}失败 sid={subject_id}")
                 logger.error("[%s] 豆瓣标记[%s]失败: %s", run_id, interest, series_title)
+                self._stats["failed"] += 1
                 return
             action = "mark_done" if interest == "done" else "mark_doing"
             self._log(run_id, action, series_guid, series_title,
                       f"豆瓣ID={subject_id} ep={max_watched}/{total_eps}")
             logger.info("[%s] %s: %s (%s)", run_id, action, series_title, interest)
+            if interest == "done":
+                self._stats["done"] += 1
+            else:
+                self._stats["doing"] += 1
         else:
             self._log(run_id, "skip_middle", series_guid, series_title,
                       f"中间集跳过 ep={max_watched}/{total_eps}")
+            self._stats["skipped"] += 1
 
         # 更新所有本批播放记录的状态
         for play in plays:

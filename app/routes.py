@@ -80,6 +80,7 @@ def config_page():
         except ValueError:
             pass
         cfg.private = request.form.get("private") == "on"
+        cfg.bark_key = request.form.get("bark_key", "")
         message = "配置已保存"
         # 重排定时任务
         try:
@@ -230,3 +231,24 @@ def api_stats():
     if not user_guid:
         return jsonify({"error": "未选择用户"}), 400
     return jsonify(store.get_stats(user_guid))
+
+
+@bp.route("/api/bark/test", methods=["POST"])
+def api_bark_test():
+    from flask import current_app
+    key = request.json.get("device_key", "")
+    if not key:
+        return jsonify({"ok": False, "message": "请填写 Bark Key"})
+
+    notifier = current_app.extensions.get("notifier")
+    if not notifier:
+        return jsonify({"ok": False, "message": "通知器未初始化"})
+
+    saved_key = notifier._device_key
+    notifier._device_key = key
+    ok = notifier.send("测试通知", "Bark 推送已生效 🎉", group="DouBanSync-测试")
+    notifier._device_key = saved_key
+
+    if ok:
+        return jsonify({"ok": True, "message": "测试通知已发送，请查看手机"})
+    return jsonify({"ok": False, "message": "推送失败，请检查 Bark Key"})

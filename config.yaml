@@ -16,3 +16,6 @@ watch_threshold_percent: 90
 
 # 豆瓣标记默认仅自己可见
 private: true
+
+# Bark 推送（iOS），填写设备 key 启用，留空禁用
+bark_key: ""
