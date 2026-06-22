@@ -6,8 +6,8 @@ services:
     ports:
       - "58080:5000"
     volumes:
-      # 飞牛影视数据库文件（只读），请修改为你的实际路径
-      - /vol1/@apps/trimmedia/trimmedia.db:/fntv-db/trimmedia.db:ro
+      # 飞牛影视数据库文件（只读）
+      - /usr/local/apps/@appdata/trim.media/database/trimmedia.db:/fntv-db/trimmedia.db:ro
       # 持久化同步状态和配置（自动创建）
       - ./sync_state:/app/sync_state
     environment:
