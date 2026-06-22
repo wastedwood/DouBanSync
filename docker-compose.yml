@@ -1,12 +1,15 @@
 services:
   fntv-douban-sync:
-    build: .
+    # 使用预先构建的镜像（从 Docker Hub 拉取）
+    image: wastedwood/doubansync:latest
     container_name: fntv-douban-sync
     ports:
       - "58080:5000"
     volumes:
-      - /usr/local/apps/@appdata/trim.media/database/trimmedia.db:/fntv-db/trimmedia.db:ro
-      - /vol1/1000/docker/doubansync/sync_state:/app/sync_state
+      # 飞牛影视数据库文件（只读），请修改为你的实际路径
+      - /vol1/@apps/trimmedia/trimmedia.db:/fntv-db/trimmedia.db:ro
+      # 持久化同步状态和配置（自动创建）
+      - ./sync_state:/app/sync_state
     environment:
       - TZ=Asia/Shanghai
       - FNTV_DB_PATH=/fntv-db/trimmedia.db
