@@ -111,10 +111,11 @@ volumes:
 
 > 飞牛影视数据库通常位于飞牛 OS 的 `/usr/local/apps/@appdata/trim.media/database/trimmedia.db`，`/vol1/@apps/trimmedia/trimmedia.db` 是其符号链接。如有权限问题，请直接挂载原路径。
 
-**3. 构建并启动**
+**3. 拉取并启动**
 
 ```bash
-docker compose up -d --build
+docker compose pull   # 拉取最新镜像
+docker compose up -d  # 启动容器
 ```
 
 **4. 打开浏览器配置**

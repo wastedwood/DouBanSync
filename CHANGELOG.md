@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.2 (2026-06-22)
+
+### 🔧 修复
+- **FNTV 数据库路径**：docker-compose 默认路径修正为飞牛 OS 真实路径（`/usr/local/apps/@appdata/trim.media/database/trimmedia.db`），替代之前的符号链接
+
+## v0.1.1 (2026-06-22)
+
+### ⚙️ 基础设施
+- **GitHub Actions CI**：自动构建并推送 Docker 镜像到 Docker Hub
+
+### 📖 文档
+- 播放阈值说明改为"支持自定义"，消除"固定 90%"的歧义
+- README 功能表格增加 Bark 推送通知说明
+
 ## v0.1.0 (2026-06-22)
 
 ### ✨ 新功能
