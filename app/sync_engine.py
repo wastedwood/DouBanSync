@@ -105,7 +105,7 @@ class SyncEngine:
             self._log(run_id, "auth_failed", detail="豆瓣 Cookie 无效")
             self._emit(run_id, "sync_end", success=False)
             if self._notifier and self._notifier.enabled:
-                self._notifier.send("⚠️ 豆瓣同步失败", "Cookie 已过期，请在 Web 端更新",
+                self._notifier.send("DouBanSync", "⚠️ Cookie 过期，请在 Web 端更新",
                                     group="DouBanSync-警报")
             return run_id
 
@@ -239,7 +239,7 @@ class SyncEngine:
         if self._stats["skipped"]:
             parts.append(f"跳过 {self._stats['skipped']}")
         body = "、".join(parts) if parts else "无变更"
-        self._notifier.send("同步完成", body)
+        self._notifier.send("DouBanSync", body)
 
     # ── 电影 ─────────────────────────────────────────
 
