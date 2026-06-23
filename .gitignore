@@ -24,3 +24,6 @@ Thumbs.db
 .dockerignore
 .superpowers/
 .playwright-mcp/
+
+# Superpowers skill artifacts
+docs/superpowers/
