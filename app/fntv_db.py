@@ -69,11 +69,11 @@ class FntvDb:
         ).fetchone()
         if not row:
             return ItemCategory.UNKNOWN
-        if row["episode_number"] is not None:
+        if (row["episode_number"] or 0) > 0:
             return ItemCategory.EPISODE
-        if row["season_number"] is not None:
+        if (row["season_number"] or 0) > 0:
             return ItemCategory.SEASON
-        if row["parent_guid"] is None:
+        if not row["parent_guid"]:
             cnt = conn.execute(
                 "SELECT COUNT(*) AS c FROM item WHERE parent_guid = ?",
                 (item_guid,)
