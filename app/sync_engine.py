@@ -60,6 +60,8 @@ class SyncEngine:
     @staticmethod
     def _calc_watch_pct(play: dict) -> tuple[float, bool]:
         """计算播放百分比，返回 (百分比, 是否可判定)"""
+        if play.get("watched"):
+            return 100.0, True
         runtime = play.get("runtime_minutes") or 0
         if runtime <= 0:
             return 100.0, False  # 无法判定，默认通过
@@ -70,7 +72,10 @@ class SyncEngine:
     def _compute_fingerprint(plays: list[dict]) -> str:
         """对即将处理的播放记录计算确定性指纹"""
         sorted_plays = sorted(plays, key=lambda p: p["item_guid"])
-        parts = [f"{p['item_guid']}:{p['position_seconds']}" for p in sorted_plays]
+        parts = [
+            f"{p['item_guid']}:{p['position_seconds']}:{int(bool(p.get('watched')))}"
+            for p in sorted_plays
+        ]
         return hashlib.md5("|".join(parts).encode()).hexdigest()
 
     # ── 季度搜索标签 ─────────────────────────────────
