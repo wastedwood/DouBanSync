@@ -16,6 +16,24 @@ SEASON_LABELS = {1: "第一季", 2: "第二季", 3: "第三季", 4: "第四季",
                  5: "第五季", 6: "第六季", 7: "第七季", 8: "第八季",
                  9: "第九季", 10: "第十季"}
 
+SUMMARY_ACTIONS = {
+    "mark_done": ("done", ""),
+    "mark_doing": ("doing", ""),
+    "error_search": ("failed", "豆瓣搜索无结果"),
+    "error_api": ("failed", "豆瓣标记失败"),
+    "skip_done": ("skipped", "此前已同步"),
+    "skip_middle": ("skipped", "中间集，无需更新豆瓣"),
+}
+
+SUMMARY_SECTIONS = (
+    ("done", "✅ 已看完"),
+    ("doing", "▶️ 在看"),
+    ("failed", "❌ 失败"),
+    ("skipped", "⏭️ 跳过"),
+)
+
+MAX_SUMMARY_ITEMS = 3
+
 
 class SyncEngine:
     """FNTV → 豆瓣 同步引擎"""
@@ -31,6 +49,7 @@ class SyncEngine:
         self._lock = threading.Lock()
         self._running = False
         self._stats = {}
+        self._summary_items = {}
 
     @property
     def is_running(self) -> bool:
@@ -42,6 +61,10 @@ class SyncEngine:
              series_title: str = "", detail: str = ""):
         """写日志到 store 并广播到事件总线"""
         self._store.log_action(run_id, action, item_guid, series_title, detail)
+        summary = SUMMARY_ACTIONS.get(action)
+        if summary and series_title:
+            category, reason = summary
+            self._summary_items.setdefault(category, []).append((series_title, reason))
         if self._event_bus:
             self._event_bus.publish({
                 "type": "log",
@@ -101,6 +124,7 @@ class SyncEngine:
     def _do_run(self, user_guid: str) -> str:
         run_id = uuid.uuid4().hex[:12]
         self._stats = {"done": 0, "doing": 0, "failed": 0, "skipped": 0}
+        self._summary_items = {key: [] for key, _ in SUMMARY_SECTIONS}
         logger.info("[%s] 同步开始 user=%s", run_id, user_guid)
         self._emit(run_id, "sync_start")
 
@@ -231,20 +255,37 @@ class SyncEngine:
 
     # ── 通知 ────────────────────────────────────────
 
+    @staticmethod
+    def _build_summary_body(stats: dict, summary_items: dict) -> str:
+        lines = []
+        for category, label in SUMMARY_SECTIONS:
+            count = stats.get(category, 0)
+            if not count:
+                continue
+            lines.append(f"{label}（{count}）")
+            items = summary_items.get(category, [])
+            for title, reason in items[:MAX_SUMMARY_ITEMS]:
+                suffix = f"：{reason}" if reason else ""
+                lines.append(f"• {title}{suffix}")
+            if count > MAX_SUMMARY_ITEMS:
+                lines.append(f"• 另有 {count - MAX_SUMMARY_ITEMS} 项")
+            lines.append("")
+
+        total = sum(stats.get(key, 0) for key, _ in SUMMARY_SECTIONS)
+        lines.append(f"本次共处理 {total} 项" if total else "本次无状态变更")
+        return "\n".join(lines).strip()
+
     def _send_summary(self):
         if not self._notifier or not self._notifier.enabled:
             return
-        parts = []
-        if self._stats["done"]:
-            parts.append(f"看过 {self._stats['done']}")
-        if self._stats["doing"]:
-            parts.append(f"在看 {self._stats['doing']}")
         if self._stats["failed"]:
-            parts.append(f"失败 {self._stats['failed']}")
-        if self._stats["skipped"]:
-            parts.append(f"跳过 {self._stats['skipped']}")
-        body = "、".join(parts) if parts else "无变更"
-        self._notifier.send("DouBanSync", body)
+            title = "DouBanSync · 同步有异常"
+        elif self._stats["done"] or self._stats["doing"]:
+            title = "DouBanSync · 同步完成"
+        else:
+            title = "DouBanSync · 无需更新"
+        body = self._build_summary_body(self._stats, self._summary_items)
+        self._notifier.send(title, body)
 
     # ── 电影 ─────────────────────────────────────────
 
