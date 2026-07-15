@@ -1,11 +1,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/Flask-2.3+-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask">
+  <img src="https://img.shields.io/badge/Flask-3.0+-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
 </p>
 
-<h1 align="center">🎬 DouBanSync</h1>
+<p align="center"><img src="app/static/img/brand-mark.svg" alt="DouBanSync Logo" width="68"></p>
+<h1 align="center">DouBanSync</h1>
 <h3 align="center">飞牛影视 → 豆瓣 · 观看记录自动同步工具</h3>
 
 <p align="center">
@@ -33,16 +34,18 @@
 | 📡 **实时日志** | 浏览器端 SSE 流式展示，每一步操作清晰可见 |
 | 🔔 **Bark 推送** | 按状态推送片名、处理结果和失败原因，Cookie 过期主动告警 |
 | 🐳 **一键部署** | Docker 镜像即拉即用，无需复杂环境配置 |
-| 🌐 **Web 管理** | 浏览器配置页，无需编辑任何配置文件 |
+| 🌐 **响应式 Web 管理** | 电脑与手机都能使用，浏览器内完成配置、验证和日志查询 |
 
 ---
 
 ## 🖼️ 界面预览
 
-| 状态面板 | 配置页面 | 同步日志 |
-|:---:|:---:|:---:|
-| [![状态面板](docs/screenshot-dashboard.png)](docs/screenshot-dashboard.png) | [![配置页面](docs/screenshot-config.png)](docs/screenshot-config.png) | [![同步日志](docs/screenshot-history.png)](docs/screenshot-history.png) |
-| 同步状态一目了然，实时日志逐条展示 | 图形化配置，无需编辑文件 | 完整的历史记录与搜索 |
+| 状态面板 | 同步日志 |
+|:---:|:---:|
+| [![状态面板](docs/screenshot-dashboard.png)](docs/screenshot-dashboard.png) | [![同步日志](docs/screenshot-history.png)](docs/screenshot-history.png) |
+| 同步状态一目了然，实时日志逐条展示 | 中文结果、筛选与标题搜索 |
+
+界面所需的 Bootstrap、脚本、Logo 与图标均随项目提供，不依赖外网 CDN；在 NAS 局域网环境中断网也能保持完整排版。
 
 ---
 
@@ -95,7 +98,7 @@
 **1. 克隆或下载项目**
 
 ```bash
-git clone https://github.com/yourname/DouBanSync.git
+git clone https://github.com/wastedwood/DouBanSync.git
 cd DouBanSync
 ```
 
@@ -172,9 +175,9 @@ python -m app
 | **FNTV 数据库路径** | 容器内数据库文件路径 | `/fntv-db/trimmedia.db` |
 | **同步用户** | 选择要同步的飞牛用户 | — |
 | **豆瓣 Cookie** | 浏览器提取的完整 Cookie 字符串 | — |
-| **同步计划** | 间隔模式（每 N 小时）或 Cron 表达式（带可视化构建器） | 每 6 小时 |
+| **同步计划** | 间隔模式（每 N 小时）或 Cron 表达式（带可视化构建器） | 每 24 小时 |
 | **播放阈值** | 支持自定义，超过设定百分比才算已看（0 为不限制） | 90% |
-| **仅自己可见** | 豆瓣标记是否仅自己可见 | 否 |
+| **仅自己可见** | 豆瓣标记是否仅自己可见 | 是 |
 | **Bark Key** | iOS 推送设备标识，留空禁用（从 Bark App 复制） | 空 |
 
 ---
@@ -229,7 +232,7 @@ python -m app
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourname/DouBanSync.git
+git clone https://github.com/wastedwood/DouBanSync.git
 cd DouBanSync
 
 # 安装依赖
@@ -256,6 +259,7 @@ DouBanSync/
 │   ├── routes.py           # Web 路由 + API 端点
 │   ├── sync_engine.py      # 同步主编排引擎
 │   ├── sync_store.py       # 同步状态持久化
+│   ├── static/              # 本地样式、脚本、Logo 与 Bootstrap
 │   └── templates/          # 页面模板
 ├── sync_state/             # 运行时数据
 ├── config.yaml             # 默认配置

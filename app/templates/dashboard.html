@@ -1,177 +1,134 @@
 {% extends "base.html" %}
-{% block title %}状态面板 - 飞牛观影同步{% endblock %}
-{% block breadcrumb %}<a href="/">首页</a> / <span class="current">状态面板</span>{% endblock %}
+{% block title %}状态面板 - DouBanSync{% endblock %}
 
 {% block content %}
-<h1 class="page-title">状态面板</h1>
+{% set ready = db_connected and cookie_set and user_set %}
+<header class="page-header">
+    <div>
+        <h1>状态面板</h1>
+        <p class="page-subtitle">自动同步飞牛影视观看记录到豆瓣</p>
+    </div>
+    <div class="page-header-actions">
+        <span class="status-pill{% if ready %} ready{% endif %}">
+            {% if ready %}同步就绪{% else %}等待配置{% endif %}
+        </span>
+    </div>
+</header>
 
-<!-- Status cards row -->
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <div class="stat-card h-100">
-            <div class="stat-label">数据库</div>
-            <div class="stat-value {% if db_connected %}text-success{% else %}text-danger{% endif %}">
-                {% if db_connected %}已连接{% else %}未连接{% endif %}
-            </div>
-        </div>
+{% if not ready %}
+<section class="surface-card readiness-card" aria-labelledby="readiness-title">
+    <div class="readiness-icon" aria-hidden="true">!</div>
+    <div class="readiness-copy">
+        <h2 id="readiness-title">系统尚未准备完成</h2>
+        <p>
+            {% if not db_connected %}请连接 FNTV 数据库{% elif not cookie_set %}请填写并验证豆瓣 Cookie{% else %}请选择同步用户{% endif %}，完成后即可开始同步。
+        </p>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="stat-card h-100">
-            <div class="stat-label">豆瓣 Cookie</div>
-            <div class="stat-value {% if cookie_set %}text-success{% else %}text-danger{% endif %}">
-                {% if cookie_set %}已设置{% else %}未设置{% endif %}
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="stat-card h-100">
-            <div class="stat-label">同步用户</div>
-            <div class="stat-value {% if user_set %}text-success{% else %}text-warning{% endif %}">
-                {% if user_set %}已选择{% else %}未选择{% endif %}
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="stat-card h-100">
-            <div class="stat-label">最后同步</div>
-            <div class="stat-value" style="font-size:1rem;">{{ last_sync or '从未' }}</div>
-        </div>
-    </div>
-</div>
-
-<!-- Stats row -->
-<div class="row g-3 mb-4">
-    <div class="col-md-4">
-        <div class="stat-card text-center">
-            <div class="stat-label">同步总数</div>
-            <div class="stat-number-lg">{{ stats.total }}</div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="stat-card text-center">
-            <div class="stat-label">已完成</div>
-            <div class="stat-number-lg text-success">{{ stats.done }}</div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="stat-card text-center">
-            <div class="stat-label">失败</div>
-            <div class="stat-number-lg text-danger">{{ stats.failed }}</div>
-        </div>
-    </div>
-</div>
-
-<!-- Sync controls -->
-<div class="card-custom p-3 mb-4">
-    <div class="d-flex align-items-center gap-3">
-        <button class="btn btn-primary" id="btn-sync" {% if not user_set or not cookie_set %}disabled{% endif %}>
-            立即同步
-        </button>
-        <span class="text-muted small" id="sync-status"></span>
-    </div>
-
-    <!-- SSE log terminal -->
-    <div id="sync-live-log" class="mt-3" style="display:none;">
-        <hr class="my-2">
-        <div class="d-flex justify-content-between align-items-center mb-1">
-            <span class="small fw-semibold text-muted">同步日志（实时）</span>
-            <span class="small text-muted" id="log-count">0 条</span>
-        </div>
-        <div class="log-terminal p-2" id="log-container"></div>
-    </div>
-</div>
-
-<!-- Config warning -->
-{% if not user_set or not cookie_set or not db_connected %}
-<div class="alert alert-warning alert-custom">
-    <strong>配置未完成</strong>
-    <ul class="mb-0 mt-1">
-        {% if not db_connected %}<li>FNTV 数据库未连接，请前往<a href="/config" class="alert-link">配置页</a>设置数据库路径</li>{% endif %}
-        {% if not cookie_set %}<li>豆瓣 Cookie 未设置，请前往<a href="/config" class="alert-link">配置页</a>填入 Cookie</li>{% endif %}
-        {% if not user_set %}<li>未选择同步用户，请前往<a href="/config" class="alert-link">配置页</a>选择用户</li>{% endif %}
-    </ul>
-</div>
+    <a class="btn btn-outline-brand px-3" href="/config">前往配置</a>
+</section>
 {% endif %}
+
+<section class="status-grid" aria-label="连接状态">
+    <article class="surface-card status-card">
+        <div class="status-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg>
+        </div>
+        <div>
+            <div class="status-card-label">FNTV 数据库</div>
+            <div class="status-card-value"><span class="value-dot {% if db_connected %}success{% else %}danger{% endif %}"></span>{% if db_connected %}已连接{% else %}未连接{% endif %}</div>
+        </div>
+    </article>
+    <article class="surface-card status-card">
+        <div class="status-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21c.6-4.2 3-6.3 7-6.3s6.4 2.1 7 6.3"/></svg>
+        </div>
+        <div>
+            <div class="status-card-label">豆瓣账号</div>
+            <div class="status-card-value"><span class="value-dot {% if cookie_set %}success{% else %}danger{% endif %}"></span>{% if cookie_set %}已设置{% else %}未设置{% endif %}</div>
+        </div>
+    </article>
+    <article class="surface-card status-card">
+        <div class="status-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3.5 20c.5-4 2.3-6 5.5-6s5 2 5.5 6M14 15c3.6-.6 5.7 1 6.5 4.5"/></svg>
+        </div>
+        <div>
+            <div class="status-card-label">同步用户</div>
+            <div class="status-card-value"><span class="value-dot {% if user_set %}success{% else %}warning{% endif %}"></span>{% if user_set %}已选择{% else %}未选择{% endif %}</div>
+        </div>
+    </article>
+    <article class="surface-card status-card">
+        <div class="status-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </div>
+        <div>
+            <div class="status-card-label">最后同步</div>
+            <div class="status-card-value"><span class="value-dot"></span>{{ last_sync or '从未' }}</div>
+        </div>
+    </article>
+</section>
+
+<section class="surface-card sync-card" aria-label="立即同步">
+    <div class="sync-control-row">
+        <button class="btn btn-brand px-4" id="btn-sync" type="button"
+                {% if not ready or engine_running %}disabled{% endif %}
+                data-engine-running="{{ 'true' if engine_running else 'false' }}">
+            {% if engine_running %}正在同步{% else %}立即同步{% endif %}
+        </button>
+        <span class="sync-helper">
+            {% if not ready %}完成配置后即可使用{% elif engine_running %}同步任务正在后台运行{% else %}只处理上次同步后的新增观看记录{% endif %}
+        </span>
+        <span class="sync-status" id="sync-status" aria-live="polite"></span>
+    </div>
+    <div id="sync-live-log" hidden>
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <strong class="small">实时同步记录</strong>
+            <span class="small text-secondary" id="log-count">0 条</span>
+        </div>
+        <div class="log-terminal" id="log-container" role="log" aria-live="polite"></div>
+    </div>
+</section>
+
+<section class="metrics-grid" aria-label="同步统计">
+    <article class="surface-card metric-card">
+        <div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg></div>
+        <div><div class="metric-label">同步总数</div><div class="metric-value">{{ stats.total }}</div></div>
+    </article>
+    <article class="surface-card metric-card success">
+        <div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 9"/></svg></div>
+        <div><div class="metric-label">已完成</div><div class="metric-value">{{ stats.done }}</div></div>
+    </article>
+    <article class="surface-card metric-card danger">
+        <div class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg></div>
+        <div><div class="metric-label">失败</div><div class="metric-value">{{ stats.failed }}</div></div>
+    </article>
+</section>
+
+<section class="surface-card section-card" aria-labelledby="recent-title">
+    <div class="section-card-header">
+        <h2 id="recent-title">最近同步记录</h2>
+        <a href="/history" class="small text-decoration-none">查看全部日志 →</a>
+    </div>
+    {% if recent_logs %}
+    {% set labels = {'mark_done':'已标记看过','mark_doing':'已标记在看','skip_threshold':'播放进度不足','skip_middle':'中间集已跳过','skip_done':'已同步','error_search':'搜索失败','error_api':'接口失败','auth_failed':'Cookie 失效','no_new_records':'没有新记录','all_filtered':'没有符合条件的记录','no_change_skip':'播放记录无变化'} %}
+    <ul class="recent-list">
+        {% for log in recent_logs %}
+        {% set tone = 'success' if log.action in ['mark_done','mark_doing'] else 'warning' if log.action.startswith('skip') or log.action in ['no_new_records','all_filtered','no_change_skip'] else 'danger' %}
+        <li class="recent-item">
+            <span class="recent-time">{{ log.created_at | timestamp_to_dt if log.created_at else '' }}</span>
+            <span class="recent-title">{{ log.series_title or log.detail or '同步任务' }}</span>
+            <span class="badge-soft {{ tone }}">{{ labels.get(log.action, log.action) }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+        <div>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 12h6M9 16h4"/></svg>
+            <p>暂无同步记录</p>
+        </div>
+    </div>
+    {% endif %}
+</section>
 {% endblock %}
 
-{% block scripts %}
-<script>
-let syncEventSource = null;
-let logCount = 0;
-const logContainer = document.getElementById('log-container');
-const syncLiveLog = document.getElementById('sync-live-log');
-const logCountEl = document.getElementById('log-count');
-
-function connectSSE() {
-    if (syncEventSource) syncEventSource.close();
-    syncEventSource = new EventSource('/api/sync/stream');
-    syncEventSource.onmessage = function(e) {
-        try {
-            const data = JSON.parse(e.data);
-            if (data.type === 'connected') return;
-            if (data.type === 'log') {
-                addLogEntry(data.action, data.series_title, data.detail);
-            } else if (data.type === 'sync_start') {
-                syncLiveLog.style.display = 'block';
-                logContainer.innerHTML = '';
-                logCount = 0;
-                if (logCountEl) logCountEl.textContent = '0 条';
-                addLogEntry('info', '同步开始', '');
-            } else if (data.type === 'sync_end') {
-                addLogEntry('info', '同步完成', data.success ? '' : '失败');
-                const btn = document.getElementById('btn-sync');
-                if (btn) btn.disabled = false;
-                const statusEl = document.getElementById('sync-status');
-                if (data.success) {
-                    statusEl.textContent = '同步完成';
-                    setTimeout(() => location.reload(), 2000);
-                } else {
-                    statusEl.textContent = '同步失败';
-                }
-            }
-        } catch(e) {}
-    };
-}
-
-function addLogEntry(action, title, detail) {
-    if (!logContainer) return;
-    logCount++;
-    if (logCountEl) logCountEl.textContent = logCount + ' 条';
-    const line = document.createElement('div');
-    const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
-    const actionClass = 'log-' + (action === 'info' || action === 'no_new_records' || action === 'all_filtered' ? 'info' : action);
-    line.innerHTML = '<span class="log-time">[' + time + ']</span> <span class="' + actionClass + '">' + escapeHtml(action) + '</span> ' + escapeHtml(title || '') + (detail ? ' <span style="color:#9ca3af;">— ' + escapeHtml(detail) + '</span>' : '');
-    logContainer.appendChild(line);
-    logContainer.scrollTop = logContainer.scrollHeight;
-}
-
-function escapeHtml(s) {
-    if (!s) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    connectSSE();
-    document.getElementById('btn-sync')?.addEventListener('click', async function() {
-        const statusEl = document.getElementById('sync-status');
-        this.disabled = true;
-        statusEl.textContent = '同步中...';
-        syncLiveLog.style.display = 'block';
-        logContainer.innerHTML = '';
-        logCount = 0;
-        if (logCountEl) logCountEl.textContent = '0 条';
-        try {
-            const resp = await fetch('/api/sync/run', { method: 'POST' });
-            const data = await resp.json();
-            if (!resp.ok) {
-                statusEl.textContent = '错误: ' + (data.error || '未知错误');
-                this.disabled = false;
-            }
-        } catch (e) {
-            statusEl.textContent = '请求失败: ' + e.message;
-            this.disabled = false;
-        }
-    });
-});
-</script>
-{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>{% endblock %}

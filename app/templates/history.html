@@ -1,61 +1,66 @@
 {% extends "base.html" %}
-{% block title %}同步日志 - 飞牛观影同步{% endblock %}
-{% block breadcrumb %}<a href="/">首页</a> / <span class="current">同步日志</span>{% endblock %}
+{% block title %}同步日志 - DouBanSync{% endblock %}
 
 {% block content %}
-<h1 class="page-title">同步日志</h1>
+<header class="page-header">
+    <div>
+        <h1>同步日志</h1>
+        <p class="page-subtitle">查看每条观看记录的同步结果与处理原因</p>
+    </div>
+</header>
 
-<div class="card-custom p-0">
+{% set labels = {'mark_done':'已标记看过','mark_doing':'已标记在看','skip_threshold':'播放进度不足','skip_middle':'中间集已跳过','skip_done':'已同步','error_search':'搜索失败','error_api':'接口失败','auth_failed':'Cookie 失效','no_new_records':'没有新记录','all_filtered':'没有符合条件的记录','no_change_skip':'播放记录无变化'} %}
+<section class="surface-card section-card" aria-label="同步日志列表">
+    <div class="history-toolbar">
+        <label class="visually-hidden" for="history-filter">结果筛选</label>
+        <select class="form-select" id="history-filter">
+            <option value="all">全部结果</option>
+            <option value="success">同步成功</option>
+            <option value="warning">已跳过</option>
+            <option value="danger">同步失败</option>
+        </select>
+        <div class="history-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg>
+            <label class="visually-hidden" for="history-search">搜索影视标题</label>
+            <input class="form-control" id="history-search" type="search" placeholder="搜索影视标题" autocomplete="off">
+        </div>
+        <span class="history-count" id="history-count">本页 {{ logs|length }} 条</span>
+    </div>
+
     <div class="table-responsive">
-        <table class="table-custom table table-hover">
-            <thead>
-                <tr>
-                    <th style="width:160px">时间</th>
-                    <th style="width:100px">操作</th>
-                    <th>标题</th>
-                    <th>详情</th>
-                </tr>
-            </thead>
-            <tbody>
+        <table class="table history-table">
+            <thead><tr><th>时间</th><th>结果</th><th>影视标题</th><th>处理说明</th></tr></thead>
+            <tbody id="history-body">
                 {% for log in logs %}
-                <tr>
-                    <td class="small text-nowrap">
-                        {% if log.created_at %}
-                            {{ log.created_at | timestamp_to_dt }}
-                        {% endif %}
+                {% set tone = 'success' if log.action in ['mark_done','mark_doing'] else 'warning' if log.action.startswith('skip') or log.action in ['no_new_records','all_filtered','no_change_skip'] else 'danger' %}
+                <tr class="history-row" data-tone="{{ tone }}" data-title="{{ (log.series_title or '')|lower }}">
+                    <td data-label="时间" class="text-nowrap">{% if log.created_at %}{{ log.created_at | timestamp_to_dt }}{% endif %}</td>
+                    <td data-label="结果"><span class="badge-soft {{ tone }}">{{ labels.get(log.action, log.action) }}</span></td>
+                    <td data-label="标题" class="history-title">{{ log.series_title or '同步任务' }}</td>
+                    <td data-label="详情">
+                        {% set detail = log.detail or '没有补充说明' %}
+                        {% if detail|length > 80 %}
+                        <details class="history-detail"><summary>{{ detail[:80] }}…</summary><div class="history-detail-full">{{ detail }}</div></details>
+                        {% else %}<span class="history-detail">{{ detail }}</span>{% endif %}
                     </td>
-                    <td>
-                        <span class="badge bg-{{ 'success' if 'done' in log.action else 'info' if 'doing' in log.action else 'warning' if 'skip' in log.action else 'danger' }}">
-                            {{ log.action }}
-                        </span>
-                    </td>
-                    <td>{{ log.series_title or '-' }}</td>
-                    <td class="small text-muted">{{ log.detail[:80] }}</td>
                 </tr>
                 {% else %}
-                <tr>
-                    <td colspan="4">
-                        <div class="empty-state">
-                            <div class="empty-icon">📋</div>
-                            <p class="mb-0">暂无同步日志</p>
-                        </div>
-                    </td>
-                </tr>
+                <tr id="history-empty"><td colspan="4"><div class="empty-state"><div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 12h6M9 16h4"/></svg><p>暂无同步日志</p></div></div></td></tr>
                 {% endfor %}
+                <tr id="history-no-match" hidden><td colspan="4"><div class="empty-state"><div><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg><p>没有符合筛选条件的记录</p></div></div></td></tr>
             </tbody>
         </table>
     </div>
-</div>
+</section>
 
-<nav class="mt-3 d-flex justify-content-between align-items-center">
-    <span class="small text-muted">页码 {{ page }}</span>
-    <ul class="pagination pagination-sm pagination-custom mb-0">
-        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
-            <a class="page-link" href="?page={{ page - 1 }}">上一页</a>
-        </li>
-        <li class="page-item {% if logs|length < 50 %}disabled{% endif %}">
-            <a class="page-link" href="?page={{ page + 1 }}">下一页</a>
-        </li>
+<nav class="pagination-wrap" aria-label="日志分页">
+    <span class="small text-secondary">第 {{ page }} 页</span>
+    <ul class="pagination pagination-sm mb-0">
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}"><a class="page-link" href="?page={{ page - 1 }}">上一页</a></li>
+        <li class="page-item active"><span class="page-link bg-success border-success">{{ page }}</span></li>
+        <li class="page-item {% if logs|length < 50 %}disabled{% endif %}"><a class="page-link" href="?page={{ page + 1 }}">下一页</a></li>
     </ul>
 </nav>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/history.js') }}" defer></script>{% endblock %}

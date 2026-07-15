@@ -38,6 +38,7 @@ def dashboard():
 
     if user_guid:
         stats = store.get_stats(user_guid)
+    recent_logs = store.get_logs(5, 0)
     last_sync_ts = store.get_config("last_sync_time", "0")
     if last_sync_ts != "0":
         from datetime import datetime
@@ -53,7 +54,8 @@ def dashboard():
                            db_connected=db_connected,
                            cookie_set=bool(cfg.douban_cookie),
                            user_set=bool(user_guid),
-                           engine_running=engine.is_running,
+                           engine_running=bool(engine and engine.is_running),
+                           recent_logs=recent_logs,
                            config=cfg.to_dict())
 
 
@@ -119,7 +121,7 @@ def config_page():
 @bp.route("/history")
 def history_page():
     store = _get_deps()[0]
-    page = request.args.get("page", 1, type=int)
+    page = max(1, request.args.get("page", 1, type=int))
     per_page = 50
     logs = store.get_logs(per_page, (page - 1) * per_page)
     return render_template("history.html", logs=logs, page=page)
