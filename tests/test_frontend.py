@@ -24,6 +24,10 @@ class FrontendStructureTests(unittest.TestCase):
         self.assertTrue((STATIC_DIR / "vendor" / "bootstrap" / "bootstrap.min.css").is_file())
         self.assertTrue((STATIC_DIR / "vendor" / "bootstrap" / "bootstrap.bundle.min.js").is_file())
 
+    def test_sidebar_shows_current_project_version(self):
+        base = (TEMPLATE_DIR / "base.html").read_text(encoding="utf-8")
+        self.assertIn('class="sidebar-version">v0.2.1</span>', base)
+
     def test_templates_have_no_inline_event_handlers(self):
         html = "\n".join(path.read_text(encoding="utf-8") for path in TEMPLATE_DIR.glob("*.html"))
         for attribute in ("onclick=", "onchange=", "oninput="):
