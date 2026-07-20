@@ -138,6 +138,10 @@ class SyncEngine:
                                     group="DouBanSync-警报")
             return run_id
 
+        # 旧版本把 done 原样发送给豆瓣，可能只返回成功但仍停留在 wish。
+        # 首次升级后检查本地已完成条目，修复实际状态不一致的历史记录。
+        self._repair_legacy_done(run_id, client, user_guid)
+
         last_sync = int(self._store.get_config("last_sync_time", "0"))
         plays = self._fntv.get_new_plays(user_guid, last_sync)
         if not plays:
@@ -252,6 +256,33 @@ class SyncEngine:
         self._emit(run_id, "sync_end", success=True)
         self._send_summary()
         return run_id
+
+    def _repair_legacy_done(self, run_id: str, client: DoubanClient,
+                            user_guid: str):
+        """一次性修复旧版本误记为 done、但豆瓣仍处于 wish 的条目"""
+        marker = f"douban_interest_mapping_v2:{user_guid}"
+        if self._store.get_config(marker, "") == "1":
+            return
+
+        subjects = self._store.get_done_subjects(user_guid)
+        checked = repaired = failed = 0
+        for item in subjects:
+            subject_id = item["douban_subject_id"]
+            checked += 1
+            actual = client.get_interest_status(subject_id)
+            if actual == "collect":
+                continue
+            if actual is None or not client.mark_interest(subject_id, "done", self._private):
+                failed += 1
+                logger.warning("[%s] 历史豆瓣状态修复失败 sid=%s actual=%s",
+                               run_id, subject_id, actual or "未知")
+            else:
+                repaired += 1
+
+        if not failed:
+            self._store.set_config(marker, "1")
+        logger.info("[%s] 历史豆瓣状态检查完成: 检查=%d 修复=%d 失败=%d",
+                    run_id, checked, repaired, failed)
 
     # ── 通知 ────────────────────────────────────────
 

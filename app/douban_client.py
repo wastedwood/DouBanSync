@@ -21,6 +21,13 @@ BASE_HEADERS = {
     "DNT": "1",
 }
 
+# 应用内部使用 done/doing，豆瓣接口使用 collect/do。
+DOUBAN_INTEREST_MAP = {
+    "do": "do",
+    "doing": "do",
+    "done": "collect",
+}
+
 
 class DoubanClient:
     """豆瓣 API 封装：搜索条目 + 标记状态"""
@@ -143,12 +150,25 @@ class DoubanClient:
 
     # ── 标记状态 ─────────────────────────────────────
 
+    def _subject_headers(self, subject_id: str) -> dict:
+        return {
+            **BASE_HEADERS,
+            "Referer": f"https://movie.douban.com/subject/{subject_id}/",
+            "Origin": "https://movie.douban.com",
+            "Host": "movie.douban.com",
+            "Cookie": self._make_cookie_header(),
+        }
+
     def mark_interest(self, subject_id: str, interest: str, private: bool = True) -> bool:
-        """标记豆瓣条目观看状态（interest: do/done/doing）"""
+        """标记豆瓣条目观看状态，并核对豆瓣实际保存的状态"""
         url = f"https://movie.douban.com/j/subject/{subject_id}/interest"
+        douban_interest = DOUBAN_INTEREST_MAP.get(interest)
+        if not douban_interest:
+            logger.error("不支持的豆瓣观看状态: %s", interest)
+            return False
         data = {
             "ck": self._ck,
-            "interest": interest,
+            "interest": douban_interest,
             "rating": "",
             "foldcollect": "U",
             "tags": "",
@@ -156,14 +176,54 @@ class DoubanClient:
         }
         if private:
             data["private"] = "on"
-        headers = {
-            **BASE_HEADERS,
-            "Referer": f"https://movie.douban.com/subject/{subject_id}/",
-            "Origin": "https://movie.douban.com",
-            "Host": "movie.douban.com",
-            "Cookie": self._make_cookie_header(),
-        }
-        return self._do_post(url, data, headers)
+        if not self._do_post(url, data, self._subject_headers(subject_id)):
+            return False
+
+        actual_interest = self.get_interest_status(subject_id)
+        if actual_interest != douban_interest:
+            logger.error("豆瓣状态未按预期保存 sid=%s 请求=%s 实际=%s",
+                         subject_id, douban_interest, actual_interest or "未知")
+            return False
+        return True
+
+    def get_interest_status(self, subject_id: str) -> str | None:
+        """读取豆瓣当前状态，返回 wish/do/collect；读取失败返回 None"""
+        url = f"https://movie.douban.com/j/subject/{subject_id}/interest"
+        headers = self._subject_headers(subject_id)
+        for attempt in range(2):
+            try:
+                resp = requests.get(url, headers=headers, timeout=10)
+            except Exception as e:
+                logger.error("读取豆瓣状态异常: %s", e)
+                return None
+            if resp.status_code == 403 and attempt == 0:
+                logger.warning("读取豆瓣状态返回403，刷新 ck 后重试")
+                self._refresh_ck()
+                headers["Cookie"] = self._make_cookie_header()
+                continue
+            if resp.status_code != 200:
+                logger.error("读取豆瓣状态失败 [%d]", resp.status_code)
+                return None
+            try:
+                data = resp.json()
+            except ValueError:
+                logger.error("读取豆瓣状态响应不是 JSON")
+                return None
+
+            status = data.get("interest_status")
+            if status:
+                return status
+
+            # 兼容未直接返回 interest_status 的旧响应格式。
+            html = data.get("html", "")
+            if html:
+                from bs4 import BeautifulSoup
+                checked = BeautifulSoup(html, "lxml").select_one(
+                    'input[name="interest"]:checked'
+                )
+                return checked.get("value") if checked else None
+            return None
+        return None
 
     def _do_post(self, url: str, data: dict, headers: dict) -> bool:
         for attempt in range(2):

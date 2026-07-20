@@ -106,6 +106,19 @@ class SyncStore:
                     return st
             return None
 
+    def get_done_subjects(self, user_guid: str) -> list[dict]:
+        """获取本地已记为看过的豆瓣条目，按 subject_id 去重"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT douban_subject_id, MAX(COALESCE(series_title, '')) AS title
+                   FROM sync_state
+                   WHERE user_guid=? AND status='done'
+                     AND douban_subject_id IS NOT NULL AND douban_subject_id != ''
+                   GROUP BY douban_subject_id""",
+                (user_guid,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_stats(self, user_guid: str) -> dict:
         """获取同步统计"""
         with self._connect() as conn:
