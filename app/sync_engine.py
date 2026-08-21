@@ -107,6 +107,16 @@ class SyncEngine:
     def _season_label(season_number: int) -> str:
         return SEASON_LABELS.get(season_number, f"第{season_number}季")
 
+    @classmethod
+    def _build_tv_search_title(cls, series_title: str, season_number: int | None,
+                               is_inferred: bool = False) -> str:
+        """构造电视剧搜索词，避免多季剧集始终命中第一季"""
+        # 标准层级的第一季沿用总剧名搜索；第二季及以后必须带季度标签。
+        # 扁平结构的季度号是推断得到的，第一季也保留原有的带标签搜索策略。
+        if season_number and (is_inferred or season_number > 1):
+            return f"{series_title} {cls._season_label(season_number)}"
+        return series_title
+
     # ── 主同步流程 ───────────────────────────────────
 
     def run(self, user_guid: str) -> str:
@@ -401,10 +411,10 @@ class SyncEngine:
                 break
 
         if not subject_id:
-            # 智能搜索：如有季度信息则附加季度标签
-            search_title = series_title
-            if is_inferred and season_number:
-                search_title = f"{series_title} {self._season_label(season_number)}"
+            # 智能搜索：多季剧集附加季度标签，避免豆瓣默认返回第一季
+            search_title = self._build_tv_search_title(
+                series_title, season_number, is_inferred
+            )
 
             name, subject_id = client.search_subject(search_title)
             if not subject_id:

@@ -38,6 +38,26 @@ class WatchPercentageTests(unittest.TestCase):
         )
 
 
+class TvSearchTitleTests(unittest.TestCase):
+    def test_standard_second_season_includes_season_label(self):
+        self.assertEqual(
+            SyncEngine._build_tv_search_title("三体", 2),
+            "三体 第二季",
+        )
+
+    def test_standard_first_season_keeps_generic_search(self):
+        self.assertEqual(
+            SyncEngine._build_tv_search_title("三体", 1),
+            "三体",
+        )
+
+    def test_inferred_first_season_keeps_season_label(self):
+        self.assertEqual(
+            SyncEngine._build_tv_search_title("三体", 1, is_inferred=True),
+            "三体 第一季",
+        )
+
+
 class SummaryNotificationTests(unittest.TestCase):
     def test_summary_contains_title_and_result_sections(self):
         body = SyncEngine._build_summary_body(
