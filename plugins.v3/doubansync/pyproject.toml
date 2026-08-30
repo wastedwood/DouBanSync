@@ -1,0 +1,9 @@
+[project]
+name = "moviepilot-plugin-doubansync"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "requests>=2.31",
+]

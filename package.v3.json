@@ -1,0 +1,15 @@
+{
+  "DouBanSync": {
+    "name": "飞牛影视同步豆瓣",
+    "description": "将飞牛影视中的电影和剧集播放记录自动同步到豆瓣观看状态。",
+    "labels": "飞牛影视,FNTV,豆瓣,观看记录,同步",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/wastedwood/DouBanSync/main/app/static/img/brand-mark.svg",
+    "author": "wastedwood",
+    "level": 1,
+    "system_version": ">=3.0.0",
+    "history": {
+      "v1.0.0": "首次提供 MoviePilot V3 插件版本。"
+    }
+  }
+}

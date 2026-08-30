@@ -60,6 +60,7 @@
   - [获取豆瓣 Cookie](#获取豆瓣-cookie)
   - [配置项一览](#配置项一览)
 - [架构概览](#-架构概览)
+- [MoviePilot V3 插件](#-moviepilot-v3-插件)
 - [开发指南](#-开发指南)
 - [致谢](#-致谢)
 
@@ -268,6 +269,28 @@ DouBanSync/
 ├── requirements.txt        # Python 依赖
 └── README.md               # 本文件
 ```
+
+---
+
+## 🧩 MoviePilot V3 插件
+
+项目同时提供可被 MoviePilot V3 加载的插件目录：`plugins.v3/doubansync`。插件保留原有同步核心，使用 MoviePilot 的配置表单、公共调度器、详情页 API 和插件数据目录；原来的 Flask/Docker 入口不受影响。
+
+使用方式：
+
+1. 将 [wastedwood/MoviePilot-Plugins](https://github.com/wastedwood/MoviePilot-Plugins) 加入 MoviePilot 的插件市场仓库配置。
+2. 安装「飞牛影视同步豆瓣」插件。
+3. 在插件配置中填写 MoviePilot 容器内的 FNTV 数据库路径、豆瓣 Cookie，并选择用户。
+4. 开启插件后保存；可勾选「保存后立即同步一次」进行首次验证。
+
+如果 MoviePilot 使用 Docker，需将 FNTV 数据库只读挂载到 MoviePilot 容器，例如：
+
+```yaml
+volumes:
+  - /宿主机路径/trimmedia.db:/fntv-db/trimmedia.db:ro
+```
+
+插件内对应填写 `/fntv-db/trimmedia.db`。插件自己的 `sync_state.db` 会写入 MoviePilot 插件数据目录，不会修改飞牛影视数据库。V3 插件的详细文件和兼容边界见 [`plugins.v3/doubansync/README.md`](plugins.v3/doubansync/README.md)。
 
 ---
 
