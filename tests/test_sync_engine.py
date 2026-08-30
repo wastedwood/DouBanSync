@@ -57,6 +57,16 @@ class TvSearchTitleTests(unittest.TestCase):
             "三体 第一季",
         )
 
+    def test_series_title_already_with_season_is_not_duplicated(self):
+        self.assertEqual(
+            SyncEngine._build_tv_search_title("怪奇物语 第二季", 2),
+            "怪奇物语 第二季",
+        )
+        self.assertEqual(
+            SyncEngine._build_tv_search_title("Dark S03", None),
+            "Dark 第三季",
+        )
+
 
 class SummaryNotificationTests(unittest.TestCase):
     def test_summary_contains_title_and_result_sections(self):

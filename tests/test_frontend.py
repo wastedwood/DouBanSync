@@ -26,7 +26,7 @@ class FrontendStructureTests(unittest.TestCase):
 
     def test_sidebar_shows_current_project_version(self):
         base = (TEMPLATE_DIR / "base.html").read_text(encoding="utf-8")
-        self.assertIn('class="sidebar-version">v0.2.2</span>', base)
+        self.assertIn('class="sidebar-version">v0.3.1</span>', base)
 
     def test_templates_have_no_inline_event_handlers(self):
         html = "\n".join(path.read_text(encoding="utf-8") for path in TEMPLATE_DIR.glob("*.html"))

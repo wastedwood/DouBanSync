@@ -112,14 +112,29 @@ class FntvDb:
         """从单集 guid 反查 Series/Season 信息"""
         row = conn.execute(
             """SELECT season.guid AS season_guid, season.parent_guid AS series_guid,
-                      season.season_number, series.title AS series_title
+                      COALESCE(season.season_number, episode.season_number) AS season_number,
+                      season.title AS season_title,
+                      series.title AS series_title,
+                      episode.title AS episode_title
                FROM item AS episode
                JOIN item AS season ON episode.parent_guid = season.guid
                JOIN item AS series ON season.parent_guid = series.guid
                WHERE episode.guid = ?""",
             (episode_guid,)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        res = dict(row)
+        if not res.get("season_number"):
+            from plugins.v3.doubansync.core.douban_client import extract_season_info
+            _, s_num = extract_season_info(res.get("season_title") or "")
+            if not s_num:
+                _, s_num = extract_season_info(res.get("series_title") or "")
+            if not s_num:
+                _, s_num = extract_season_info(res.get("episode_title") or "")
+            if s_num:
+                res["season_number"] = s_num
+        return res
 
     # ── 智能跨季推断 ────────────────────────────────────
 
@@ -128,13 +143,25 @@ class FntvDb:
         row = conn.execute(
             """SELECT episode.parent_guid AS series_guid,
                       series.title AS series_title,
-                      episode.episode_number
+                      episode.episode_number,
+                      episode.season_number,
+                      episode.title AS episode_title
                FROM item AS episode
                JOIN item AS series ON episode.parent_guid = series.guid
                WHERE episode.guid = ? AND series.parent_guid IS NULL""",
             (episode_guid,)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        res = dict(row)
+        if not res.get("season_number"):
+            from plugins.v3.doubansync.core.douban_client import extract_season_info
+            _, s_num = extract_season_info(res.get("series_title") or "")
+            if not s_num:
+                _, s_num = extract_season_info(res.get("episode_title") or "")
+            if s_num:
+                res["season_number"] = s_num
+        return res
 
     def get_all_series_episodes(self, conn, series_guid: str) -> list[dict]:
         """获取某系列所有剧集的 episode_number（用于模式检测）"""

@@ -1,7 +1,91 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from app.douban_client import DoubanClient
+from app.douban_client import (
+    DoubanClient,
+    extract_season_info,
+    match_season_in_title,
+    parse_season_number,
+)
+
+
+class SeasonParsingTests(unittest.TestCase):
+    def test_parse_season_numbers(self):
+        self.assertEqual(parse_season_number("1"), 1)
+        self.assertEqual(parse_season_number("一"), 1)
+        self.assertEqual(parse_season_number("二"), 2)
+        self.assertEqual(parse_season_number("两"), 2)
+        self.assertEqual(parse_season_number("十"), 10)
+        self.assertEqual(parse_season_number("十二"), 12)
+        self.assertIsNone(parse_season_number("abc"))
+        self.assertIsNone(parse_season_number(0))
+
+    def test_extract_season_info_chinese(self):
+        title, season = extract_season_info("怪奇物语 第二季")
+        self.assertEqual(title, "怪奇物语")
+        self.assertEqual(season, 2)
+
+        title, season = extract_season_info("曼达洛人 第2季")
+        self.assertEqual(title, "曼达洛人")
+        self.assertEqual(season, 2)
+
+    def test_extract_season_info_english(self):
+        title, season = extract_season_info("Stranger Things Season 3")
+        self.assertEqual(title, "Stranger Things")
+        self.assertEqual(season, 3)
+
+        title, season = extract_season_info("Dark S02")
+        self.assertEqual(title, "Dark")
+        self.assertEqual(season, 2)
+
+    def test_extract_season_info_no_season(self):
+        title, season = extract_season_info("肖申克的救赎")
+        self.assertEqual(title, "肖申克的救赎")
+        self.assertIsNone(season)
+
+    def test_match_season_in_title(self):
+        self.assertTrue(match_season_in_title("怪奇物语 第二季", 2))
+        self.assertFalse(match_season_in_title("怪奇物语 第二季", 1))
+        self.assertFalse(match_season_in_title("怪奇物语 第二季", 3))
+
+        self.assertTrue(match_season_in_title("怪奇物语 第一季", 1))
+        self.assertTrue(match_season_in_title("怪奇物语", 1))
+        self.assertFalse(match_season_in_title("怪奇物语", 2))
+
+        self.assertTrue(match_season_in_title("Stranger Things Season 2", 2))
+        self.assertTrue(match_season_in_title("Dark S02", 2))
+
+
+class CandidateSelectionTests(unittest.TestCase):
+    def test_selects_correct_season_when_first_result_is_season_1(self):
+        candidates = [
+            ("怪奇物语 第一季 Stranger Things Season 1 (2016)", "111"),
+            ("怪奇物语 第二季 Stranger Things Season 2 (2017)", "222"),
+            ("怪奇物语 第三季 Stranger Things Season 3 (2019)", "333"),
+        ]
+
+        name, sid = DoubanClient._select_best_candidate(candidates, "怪奇物语", 2)
+        self.assertEqual(sid, "222")
+        self.assertIn("第二季", name)
+
+    def test_returns_none_when_target_season_not_in_results(self):
+        candidates = [
+            ("怪奇物语 第一季 Stranger Things Season 1 (2016)", "111"),
+            ("怪奇物语 第二季 Stranger Things Season 2 (2017)", "222"),
+        ]
+
+        name, sid = DoubanClient._select_best_candidate(candidates, "怪奇物语", 4)
+        self.assertIsNone(sid)
+        self.assertIsNone(name)
+
+    def test_selects_season_1_without_season_suffix(self):
+        candidates = [
+            ("曼达洛人 The Mandalorian (2019)", "101"),
+            ("曼达洛人 第二季 The Mandalorian Season 2 (2020)", "102"),
+        ]
+
+        name, sid = DoubanClient._select_best_candidate(candidates, "曼达洛人", 1)
+        self.assertEqual(sid, "101")
 
 
 class MarkInterestTests(unittest.TestCase):

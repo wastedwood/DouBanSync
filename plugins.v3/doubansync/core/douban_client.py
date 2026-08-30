@@ -28,6 +28,95 @@ DOUBAN_INTEREST_MAP = {
     "done": "collect",
 }
 
+CHINESE_NUM_MAP = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+    "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15,
+    "十六": 16, "十七": 17, "十八": 18, "十九": 19, "二十": 20,
+    "廿": 20, "廿一": 21, "廿二": 22, "廿三": 23, "廿四": 24,
+    "三十": 30, "四十": 40, "五十": 50,
+}
+
+SEASON_REGEXES = [
+    re.compile(r"第\s*([0-9一二两三四五六七八九十]+)\s*季", re.IGNORECASE),
+    re.compile(r"\bSeason\s*([0-9一二两三四五六七八九十]+)\b", re.IGNORECASE),
+    re.compile(r"(?:^|[\s._\-\[(])S(\d{1,2})(?:[\s._\-\])]|E\d+|$)", re.IGNORECASE),
+]
+
+
+def parse_season_number(val: str | int | None) -> int | None:
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val if val > 0 else None
+    val_str = str(val).strip()
+    if not val_str:
+        return None
+    if val_str.isdigit():
+        num = int(val_str)
+        return num if num > 0 else None
+    if val_str in CHINESE_NUM_MAP:
+        return CHINESE_NUM_MAP[val_str]
+    if val_str.startswith("二十") and len(val_str) == 3 and val_str[2] in CHINESE_NUM_MAP:
+        return 20 + CHINESE_NUM_MAP[val_str[2]]
+    if val_str.startswith("三十") and len(val_str) == 3 and val_str[2] in CHINESE_NUM_MAP:
+        return 30 + CHINESE_NUM_MAP[val_str[2]]
+    return None
+
+
+def extract_season_info(title: str) -> tuple[str, int | None]:
+    """从标题中提取干净主标题和季度号"""
+    if not title:
+        return "", None
+    title = title.strip()
+    for reg in SEASON_REGEXES:
+        match = reg.search(title)
+        if match:
+            num = parse_season_number(match.group(1))
+            if num:
+                clean = (title[:match.start()] + " " + title[match.end():]).strip()
+                clean = re.sub(r"\s+", " ", clean)
+                clean = re.sub(r"[\(\[\{（【]\s*[\)\]\}）】]", "", clean).strip()
+                return clean or title, num
+    return title, None
+
+
+def match_season_in_title(title: str, target_season: int | None) -> bool:
+    """判断给定的标题是否匹配目标季度"""
+    if not title:
+        return False
+    if target_season is None:
+        return True
+
+    _, extracted_season = extract_season_info(title)
+
+    if target_season > 1:
+        if extracted_season is not None:
+            return extracted_season == target_season
+        aliases = [
+            f"第{target_season}季",
+            f"Season {target_season}",
+            f"season {target_season}",
+            f"S{target_season:02d}",
+            f"S{target_season}",
+        ]
+        return any(re.search(r"\b" + re.escape(alias) + r"\b" if alias.isalnum() else re.escape(alias),
+                             title, re.IGNORECASE) for alias in aliases)
+
+    if target_season == 1:
+        if extracted_season == 1:
+            return True
+        if extracted_season is not None and extracted_season > 1:
+            return False
+        for s in range(2, 25):
+            aliases = [f"第{s}季", f"Season {s}", f"season {s}", f"S{s:02d}", f"S{s}"]
+            if any(re.search(r"\b" + re.escape(a) + r"\b" if a.isalnum() else re.escape(a),
+                             title, re.IGNORECASE) for a in aliases):
+                return False
+        return True
+
+    return False
+
 
 class DoubanClient:
     """豆瓣 API 封装：搜索条目 + 标记状态"""
@@ -84,8 +173,11 @@ class DoubanClient:
 
     # ── 搜索 ─────────────────────────────────────────
 
-    def search_subject(self, title: str) -> tuple[str | None, str | None]:
+    def search_subject(self, title: str, season_number: int | None = None) -> tuple[str | None, str | None]:
         """搜索豆瓣条目，返回 (subject_name, subject_id)"""
+        clean_search_title, title_season = extract_season_info(title)
+        target_season = season_number or title_season
+
         url = f"https://www.douban.com/search?cat=1002&q={requests.utils.quote(title)}"
         headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "www.douban.com"}
         try:
@@ -102,33 +194,78 @@ class DoubanClient:
                 logger.warning("豆瓣搜索请求被拦截(status=%d, len=%d): %s",
                                resp.status_code, len(resp.text), title)
                 return None, None
-            result = self._parse_search_result(resp.text)
-            if result == (None, None):
+            candidates = self._parse_search_results(resp.text)
+            if not candidates:
                 logger.debug("搜索无结果，响应前200字符: %s", resp.text[:200].strip())
-            return result
+                return None, None
+
+            return self._select_best_candidate(candidates, clean_search_title, target_season)
         except Exception as e:
             logger.error("豆瓣搜索异常: %s", e)
             return None, None
 
+    @classmethod
+    def _select_best_candidate(cls, candidates: list[tuple[str, str]],
+                               clean_search_title: str,
+                               target_season: int | None) -> tuple[str | None, str | None]:
+        if not candidates:
+            return None, None
+
+        clean_target = clean_search_title.lower().strip()
+
+        # 1) 如果有明确目标季度（第 1 季或第 2+ 季）
+        if target_season is not None:
+            season_matched = [
+                (name, sid) for (name, sid) in candidates
+                if match_season_in_title(name, target_season)
+            ]
+
+            if season_matched:
+                for name, sid in season_matched:
+                    cand_clean, _ = extract_season_info(name)
+                    cand_clean_lower = cand_clean.lower().strip()
+                    if clean_target == cand_clean_lower or clean_target in cand_clean_lower or cand_clean_lower in clean_target:
+                        return name, sid
+                return season_matched[0]
+
+            # 目标是第 2 季及以上且无匹配项时，绝不随意回退到第 1 季
+            if target_season > 1:
+                logger.warning("豆瓣搜索结果中未找到目标第 %d 季条目: search=%s 候选=%s",
+                               target_season, clean_search_title, [c[0] for c in candidates[:3]])
+                return None, None
+
+        # 2) 电影或未指定季度的条目，优先匹配标题高度一致且非第 2+ 季的条目
+        for name, sid in candidates:
+            cand_clean, cand_season = extract_season_info(name)
+            if target_season is None and cand_season and cand_season > 1:
+                continue
+            cand_clean_lower = cand_clean.lower().strip()
+            if clean_target == cand_clean_lower or clean_target in cand_clean_lower or cand_clean_lower in clean_target:
+                return name, sid
+
+        return candidates[0]
+
     @staticmethod
-    def _parse_search_result(html: str) -> tuple[str | None, str | None]:
+    def _parse_search_results(html: str) -> list[tuple[str, str]]:
         from bs4 import BeautifulSoup
         from urllib.parse import urlparse, parse_qs, unquote
         soup = BeautifulSoup(html, "lxml")
+        results = []
         for div in soup.find_all("div", class_="title"):
             a_tag = div.find("a")
             if not a_tag:
                 continue
             href = a_tag.get("href", "")
             name = a_tag.get_text(strip=True)
+            sid = None
 
             # 格式 A：直接链接 subject/ID/
             m = re.search(r"subject/(\d+)/", href)
             if m:
-                return name, m.group(1)
+                sid = m.group(1)
 
             # 格式 B：跟踪链接 link2/?url=...subject%2FID%2F...
-            if "link2" in href or "url=" in href:
+            elif "link2" in href or "url=" in href:
                 try:
                     params = parse_qs(urlparse(href).query)
                     url_param = params.get("url", [None])[0]
@@ -136,17 +273,25 @@ class DoubanClient:
                         decoded = unquote(url_param)
                         m = re.search(r"subject/(\d+)/", decoded)
                         if m:
-                            return name, m.group(1)
+                            sid = m.group(1)
                 except Exception:
-                    continue
+                    pass
 
             # 格式 C：onclick 属性中内嵌 sid
-            onclick = a_tag.get("onclick", "")
-            m = re.search(r"sid:\s*(\d+)", onclick)
-            if m:
-                return name, m.group(1)
+            elif "sid:" in a_tag.get("onclick", ""):
+                m = re.search(r"sid:\s*(\d+)", a_tag.get("onclick", ""))
+                if m:
+                    sid = m.group(1)
 
-        return None, None
+            if sid and (name, sid) not in results:
+                results.append((name, sid))
+
+        return results
+
+    @classmethod
+    def _parse_search_result(cls, html: str) -> tuple[str | None, str | None]:
+        results = cls._parse_search_results(html)
+        return results[0] if results else (None, None)
 
     # ── 标记状态 ─────────────────────────────────────
 

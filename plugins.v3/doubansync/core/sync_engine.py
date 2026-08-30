@@ -7,7 +7,7 @@ import threading
 from datetime import datetime
 
 from .fntv_db import FntvDb, ItemCategory
-from .douban_client import DoubanClient
+from .douban_client import DoubanClient, extract_season_info
 from .sync_store import SyncStore
 
 logger = logging.getLogger(__name__)
@@ -111,11 +111,13 @@ class SyncEngine:
     def _build_tv_search_title(cls, series_title: str, season_number: int | None,
                                is_inferred: bool = False) -> str:
         """构造电视剧搜索词，避免多季剧集始终命中第一季"""
+        clean_title, title_season = extract_season_info(series_title)
+        effective_season = season_number or title_season
         # 标准层级的第一季沿用总剧名搜索；第二季及以后必须带季度标签。
         # 扁平结构的季度号是推断得到的，第一季也保留原有的带标签搜索策略。
-        if season_number and (is_inferred or season_number > 1):
-            return f"{series_title} {cls._season_label(season_number)}"
-        return series_title
+        if effective_season and (is_inferred or effective_season > 1):
+            return f"{clean_title} {cls._season_label(effective_season)}"
+        return clean_title
 
     # ── 主同步流程 ───────────────────────────────────
 
@@ -229,13 +231,21 @@ class SyncEngine:
                             inferred = self._fntv.infer_episode_group(
                                 conn, flat["series_guid"], ep_num)
 
+                        season_num = None
+                        total_eps_override = None
+                        if inferred:
+                            season_num = inferred.get("season_number")
+                            total_eps_override = inferred.get("total_eps")
+                        if not season_num:
+                            season_num = flat.get("season_number") or play.get("season_number")
+
                         # 构造模拟 info
                         info = {
                             "series_guid": flat["series_guid"],
                             "season_guid": "",  # 无真实 season
-                            "season_number": inferred["season_number"] if inferred else None,
+                            "season_number": season_num,
                             "series_title": flat["series_title"],
-                            "_total_eps_override": inferred["total_eps"] if inferred else None,
+                            "_total_eps_override": total_eps_override,
                         }
                         key = (info["series_guid"], info["season_number"] or 0)
                         tv_groups.setdefault(key, {"info": info, "plays": [], "is_inferred": True})
@@ -412,11 +422,13 @@ class SyncEngine:
 
         if not subject_id:
             # 智能搜索：多季剧集附加季度标签，避免豆瓣默认返回第一季
+            clean_title, title_season = extract_season_info(series_title)
+            effective_season = season_number or title_season
             search_title = self._build_tv_search_title(
                 series_title, season_number, is_inferred
             )
 
-            name, subject_id = client.search_subject(search_title)
+            name, subject_id = client.search_subject(search_title, season_number=effective_season)
             if not subject_id:
                 logger.warning("[%s] 豆瓣搜索无结果: %s", run_id, search_title)
                 for play in plays:
@@ -484,7 +496,7 @@ class SyncEngine:
                 self._stats["doing"] += 1
         else:
             self._log(run_id, "skip_middle", series_guid, series_title,
-                      f"中间集跳过 ep={max_watched}/{total_eps}")
+              f"中间集跳过 ep={max_watched}/{total_eps}")
             self._stats["skipped"] += 1
 
         # 更新所有本批播放记录的状态
