@@ -28,3 +28,7 @@ Thumbs.db
 
 # Superpowers skill artifacts
 docs/superpowers/
+
+# Agent instructions (local only)
+CLAUDE.md
+AGENTS.md
