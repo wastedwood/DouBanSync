@@ -468,7 +468,7 @@ class SyncEngine:
         return None
 
     def _clean_wish_list(self, run_id: str, client: DoubanClient):
-        """豆瓣「想看」中已在飞牛库里的片子去掉想看标记（配置开关，默认关闭）
+        """豆瓣「想看」中已在飞牛库里的影片去掉想看标记（配置开关，默认关闭）
 
         只处理想看列表里的条目，在看 / 看过不动。
         """

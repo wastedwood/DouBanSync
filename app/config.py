@@ -112,7 +112,7 @@ class Config:
 
     @property
     def clean_wish(self) -> bool:
-        """同步时把飞牛库里已有的片子从豆瓣「想看」中移除，默认关闭"""
+        """同步时把飞牛库里已有的影片从豆瓣「想看」中移除，默认关闭"""
         return self._store.get_config("clean_wish", "") == "true"
 
     @clean_wish.setter
