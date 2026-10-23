@@ -4,7 +4,6 @@ from unittest.mock import Mock, patch
 from app.douban_client import (
     DoubanClient,
     extract_season_info,
-    match_season_in_title,
     parse_season_number,
 )
 
@@ -43,18 +42,6 @@ class SeasonParsingTests(unittest.TestCase):
         self.assertEqual(title, "肖申克的救赎")
         self.assertIsNone(season)
 
-    def test_match_season_in_title(self):
-        self.assertTrue(match_season_in_title("怪奇物语 第二季", 2))
-        self.assertFalse(match_season_in_title("怪奇物语 第二季", 1))
-        self.assertFalse(match_season_in_title("怪奇物语 第二季", 3))
-
-        self.assertTrue(match_season_in_title("怪奇物语 第一季", 1))
-        self.assertTrue(match_season_in_title("怪奇物语", 1))
-        self.assertFalse(match_season_in_title("怪奇物语", 2))
-
-        self.assertTrue(match_season_in_title("Stranger Things Season 2", 2))
-        self.assertTrue(match_season_in_title("Dark S02", 2))
-
 
 class CandidateSelectionTests(unittest.TestCase):
     def test_selects_correct_season_when_first_result_is_season_1(self):
@@ -86,6 +73,27 @@ class CandidateSelectionTests(unittest.TestCase):
 
         name, sid = DoubanClient._select_best_candidate(candidates, "曼达洛人", 1)
         self.assertEqual(sid, "101")
+
+    def test_does_not_fall_back_to_other_show_with_same_season(self):
+        candidates = [
+            ("鬼灭之刃", "1"),
+            ("鬼灭之刃 游郭篇", "2"),
+            ("咒术回战 第二季", "3"),
+        ]
+
+        self.assertEqual(DoubanClient._select_best_candidate(candidates, "鬼灭之刃", 2), (None, None))
+
+    def test_matches_season_label_without_space(self):
+        candidates = [("庆余年", "1"), ("庆余年第二季", "2")]
+
+        name, sid = DoubanClient._select_best_candidate(candidates, "庆余年", 2)
+        self.assertEqual(sid, "2")
+
+    def test_first_season_never_picks_later_season_with_matching_title(self):
+        candidates = [("其他剧", "1"), ("曼达洛人 第二季", "2")]
+
+        name, sid = DoubanClient._select_best_candidate(candidates, "曼达洛人", 1)
+        self.assertEqual(sid, "1")
 
 
 class MarkInterestTests(unittest.TestCase):

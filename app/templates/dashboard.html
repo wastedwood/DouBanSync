@@ -109,7 +109,7 @@
         <a href="/history" class="small text-decoration-none">查看全部日志 →</a>
     </div>
     {% if recent_logs %}
-    {% set labels = {'mark_done':'已标记看过','mark_doing':'已标记在看','skip_threshold':'播放进度不足','skip_middle':'中间集已跳过','skip_done':'已同步','error_search':'搜索失败','error_api':'接口失败','auth_failed':'Cookie 失效','no_new_records':'没有新记录','all_filtered':'没有符合条件的记录','no_change_skip':'播放记录无变化'} %}
+    {% set labels = {'mark_done':'已标记看过','mark_doing':'已标记在看','skip_threshold':'播放进度不足','skip_middle':'中间集已跳过','skip_special':'特别篇已跳过','repair_subject':'已修正多季条目','skip_done':'已同步','error_search':'搜索失败','error_api':'接口失败','auth_failed':'Cookie 失效','no_new_records':'没有新记录','all_filtered':'没有符合条件的记录','no_change_skip':'播放记录无变化'} %}
     <ul class="recent-list">
         {% for log in recent_logs %}
         {% set tone = 'success' if log.action in ['mark_done','mark_doing'] else 'warning' if log.action.startswith('skip') or log.action in ['no_new_records','all_filtered','no_change_skip'] else 'danger' %}

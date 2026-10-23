@@ -119,6 +119,30 @@ class SyncStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_season_subjects(self, user_guid: str) -> list[dict]:
+        """按 (剧集, 季, 豆瓣条目) 汇总已同步的电视剧季，status 取 done 优先"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT series_guid, season_number, douban_subject_id,
+                          MAX(COALESCE(series_title, '')) AS series_title,
+                          CASE WHEN SUM(status='done') > 0 THEN 'done' ELSE 'doing' END AS status
+                   FROM sync_state
+                   WHERE user_guid=? AND media_type='episode' AND status IN ('done','doing')
+                     AND douban_subject_id IS NOT NULL AND douban_subject_id != ''
+                   GROUP BY series_guid, season_number, douban_subject_id""",
+                (user_guid,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_season_subject(self, user_guid: str, series_guid: str, season_number: int,
+                              old_subject_id: str, new_subject_id: str):
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE sync_state SET douban_subject_id=?, last_synced_at=unixepoch()
+                   WHERE user_guid=? AND series_guid=? AND season_number=? AND douban_subject_id=?""",
+                (new_subject_id, user_guid, series_guid, season_number, old_subject_id)
+            )
+
     def get_stats(self, user_guid: str) -> dict:
         """获取同步统计"""
         with self._connect() as conn:

@@ -107,12 +107,20 @@ class SyncEngine:
     def _season_label(season_number: int) -> str:
         return SEASON_LABELS.get(season_number, f"第{season_number}季")
 
+    @staticmethod
+    def _resolve_season(series_title: str, season_number: int | None) -> tuple[str, int | None]:
+        """返回 (去季度剧名, 实际季度)"""
+        clean_title, title_season = extract_season_info(series_title)
+        # 续作常作为独立剧集入库（如「庆余年 第二季」下只有第 1 季），此时以剧名中的季度为准
+        if title_season and season_number in (None, 1):
+            return clean_title, title_season
+        return clean_title, season_number
+
     @classmethod
     def _build_tv_search_title(cls, series_title: str, season_number: int | None,
                                is_inferred: bool = False) -> str:
         """构造电视剧搜索词，避免多季剧集始终命中第一季"""
-        clean_title, title_season = extract_season_info(series_title)
-        effective_season = season_number or title_season
+        clean_title, effective_season = cls._resolve_season(series_title, season_number)
         # 标准层级的第一季沿用总剧名搜索；第二季及以后必须带季度标签。
         # 扁平结构的季度号是推断得到的，第一季也保留原有的带标签搜索策略。
         if effective_season and (is_inferred or effective_season > 1):
@@ -153,6 +161,7 @@ class SyncEngine:
         # 旧版本把 done 原样发送给豆瓣，可能只返回成功但仍停留在 wish。
         # 首次升级后检查本地已完成条目，修复实际状态不一致的历史记录。
         self._repair_legacy_done(run_id, client, user_guid)
+        self._repair_season_subjects(run_id, client, user_guid)
 
         last_sync = int(self._store.get_config("last_sync_time", "0"))
         plays = self._fntv.get_new_plays(user_guid, last_sync)
@@ -216,7 +225,11 @@ class SyncEngine:
                 info = self._fntv.get_series_hierarchy(conn, play["item_guid"])
 
                 if info:
-                    # 标准层级成功
+                    # 标准层级成功；第 0 季是特别篇，豆瓣通常无对应条目，搜索会误中第一季
+                    if info["season_number"] == 0:
+                        self._log(run_id, "skip_special", play["item_guid"],
+                                  info["series_title"] or "", "特别篇不同步")
+                        continue
                     key = (info["series_guid"], info["season_number"] or 0)
                     tv_groups.setdefault(key, {"info": info, "plays": [], "is_inferred": False})
                     tv_groups[key]["plays"].append(play)
@@ -302,6 +315,45 @@ class SyncEngine:
         if not failed:
             self._store.set_config(marker, "1")
         logger.info("[%s] 历史豆瓣状态检查完成: 检查=%d 修复=%d 失败=%d",
+                    run_id, checked, repaired, failed)
+
+    def _repair_season_subjects(self, run_id: str, client: DoubanClient,
+                                user_guid: str):
+        """一次性修复 v0.2.2 之前第 2 季及以后误标到第一季条目的记录
+
+        只在重新搜索能找到不同的目标季条目时才改标；找不到则保持原样，避免误伤。
+        原先被误标的第一季条目不撤销，由用户自行核对。
+        """
+        marker = f"season_subject_repair_v1:{user_guid}"
+        if self._store.get_config(marker, "") == "1":
+            return
+
+        checked = repaired = failed = 0
+        for group in self._store.get_season_subjects(user_guid):
+            series_title = group["series_title"]
+            _, season = self._resolve_season(series_title, group["season_number"])
+            if not season or season <= 1:
+                continue
+            checked += 1
+            old_sid = group["douban_subject_id"]
+            search_title = self._build_tv_search_title(series_title, group["season_number"])
+            _, new_sid = client.search_subject(search_title, season_number=season)
+            if not new_sid or new_sid == old_sid:
+                continue
+            if not client.mark_interest(new_sid, group["status"], self._private):
+                failed += 1
+                logger.warning("[%s] 多季条目修复失败: %s sid=%s",
+                               run_id, search_title, new_sid)
+                continue
+            self._store.update_season_subject(user_guid, group["series_guid"],
+                                              group["season_number"], old_sid, new_sid)
+            self._log(run_id, "repair_subject", group["series_guid"], search_title,
+                      f"豆瓣ID {old_sid} → {new_sid}（{group['status']}）")
+            repaired += 1
+
+        if not failed:
+            self._store.set_config(marker, "1")
+        logger.info("[%s] 多季豆瓣条目检查完成: 检查=%d 修复=%d 失败=%d",
                     run_id, checked, repaired, failed)
 
     # ── 通知 ────────────────────────────────────────
@@ -422,8 +474,7 @@ class SyncEngine:
 
         if not subject_id:
             # 智能搜索：多季剧集附加季度标签，避免豆瓣默认返回第一季
-            clean_title, title_season = extract_season_info(series_title)
-            effective_season = season_number or title_season
+            _, effective_season = self._resolve_season(series_title, season_number)
             search_title = self._build_tv_search_title(
                 series_title, season_number, is_inferred
             )
