@@ -24,6 +24,7 @@ Thumbs.db
 .dockerignore
 .superpowers/
 .playwright-mcp/
+.pytest_cache/
 
 # Superpowers skill artifacts
 docs/superpowers/

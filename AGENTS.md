@@ -1,172 +1,96 @@
 # DouBanSync — 项目规范
 
-## 项目定位
-
 飞牛影视(FNTV) → 豆瓣 观看记录自动同步工具。
 
 ## 目录结构
 
 ```
-DouBanSync/
-├── app/                    # 应用核心
-│   ├── __init__.py         # Flask 应用工厂 + APScheduler 启动
-│   ├── __main__.py         # 入口点 (python -m app)
-│   ├── config.py           # 配置管理器（YAML + runtime_config 两级）
-│   ├── douban_client.py    # 豆瓣非官方 API 封装（Cookie 认证 + 搜索 + 标记）
-│   ├── event_bus.py        # 线程安全事件总线（SSE 实时日志用）
-│   ├── fntv_db.py          # 飞牛影视 SQLite 只读访问层
-│   ├── routes.py           # Web 路由 + JSON API + SSE 端点
-│   ├── sync_engine.py      # 同步主编排引擎
-│   ├── sync_store.py       # 同步状态持久化（SQLite + WAL）
-│   └── templates/          # Jinja2 模板
-│       ├── base.html
-│       ├── config.html
-│       ├── cookie_guide.html
-│       ├── dashboard.html
-│       └── history.html
-├── sync_state/             # 运行时数据（由应用创建）
-│   └── sync_state.db       # SQLite: 状态表 + 日志表 + config 表
-├── config.yaml             # 默认配置（可被运行时配置覆盖）
-├── .dockerignore            # Docker 构建上下文排除规则
-├── docker-compose.yml      # Docker 编排
-├── Dockerfile              # python:3.13-alpine 构建
-├── requirements.txt        # pip 依赖
-├── AGENTS.md               # 本文件
-└── README.md               # 用户文档
+app/
+├── __init__.py         # Flask 应用工厂 + APScheduler 调度
+├── __main__.py         # 入口 (python -m app)
+├── config.py           # 配置：环境变量 > runtime_config 表 > config.yaml
+├── douban_client.py    # 豆瓣非官方接口：Cookie 认证、搜索选条目、标记状态
+├── event_bus.py        # 线程安全事件总线（SSE 实时日志）
+├── fntv_db.py          # 飞牛 SQLite 只读访问层（临时副本 + mode=ro）
+├── notifier.py         # Bark 推送
+├── routes.py           # 页面 + JSON API + SSE
+├── sync_engine.py      # 同步编排
+├── sync_store.py       # 同步状态 / 日志 / 运行时配置（SQLite WAL）
+├── static/             # 前端 JS/CSS + 本地化 Bootstrap
+└── templates/          # Jinja2 模板
+tests/                  # unittest 用例
+.github/workflows/      # 推送 v* 标签时构建并推送 Docker Hub 镜像
 ```
 
-## 架构分层
+运行时数据在 `sync_state/sync_state.db`（`SYNC_STATE_DIR` 可覆盖），不入库。
 
-```
-Web UI (Jinja2 + Bootstrap 5)
-   ↓ HTTP / SSE
-routes.py (Flask Blueprint)
-   ↓
-sync_engine.py  ←  event_bus.py (实时推送)
-   ↓        ↓
-fntv_db.py  douban_client.py
-   ↓        ↓
-FNTV SQLite  豆瓣非官方 API
-```
+## 同步流程
 
-状态持久化通过 sync_store.py → SQLite (WAL 模式)。
+1. 增量读取 `last_sync_time` 之后的播放记录
+2. 播放百分比阈值过滤（`watched` 标记优先；runtime 缺失不拦截）
+3. 播放指纹未变化则跳过豆瓣调用
+4. 分类：电影 / 剧集。剧集走 `episode→season→series` 标准层级，失败回退扁平结构推断
+5. 搜索豆瓣 → 标记状态 → 更新 `last_sync_time`
 
-## 关键约定
-
-### 同步流程
-1. 播放百分比阈值过滤
-2. 分类（电影 / 剧集），剧集优先走标准层级，回退智能跨季推断
-3. 搜索豆瓣 → 标记状态
-4. 更新 last_sync_time
+升级后的一次性修复（`_repair_*`，以 runtime_config 中的 marker 保证只跑一次，有失败则下次重试）：
+- `_repair_legacy_done`：旧版本 done 未生效的条目重新标记
+- `_repair_season_subjects`：第 2 季及以后误配到第一季条目的记录，重新搜索到不同条目才改标
 
 ### 电视剧状态机
+
 ```
 pending → doing（首集） → done（末集）
        ↘ done（已看完才首次同步）
 doing + 中间集 → 跳过（不调用豆瓣 API）
-done → 跳过幂等
+done → 跳过（幂等）
 ```
 
-### 配置优先级
-环境变量 > 运行时配置（runtime_config 表） > config.yaml 默认值
+状态按 `(series_guid, season_number)` 聚合。第 0 季（特别篇）不同步。
 
-### 定时调度
+### 多季匹配规则
 
-两种模式，通过 `sync_mode` 切换：
-- **interval**（间隔模式）：每 N 小时执行一次，由 `sync_interval_hours` 控制
-- **cron**（定时模式）：Cron 表达式精确控制执行时间，由 `sync_cron` 控制（格式：分 时 日 月 周）
+- 季度：`SyncEngine._resolve_season`。剧名自带季度（续作独立入库，如「庆余年 第二季」）且飞牛季号为 1 / 空时，以剧名为准
+- 搜索词：第 2 季及以后带季度标签（「X 第二季」）；标准层级第一季只搜剧名
+- 选条目：`DoubanClient._select_best_candidate`
+  - 第 2 季及以后：季度与剧名必须同时匹配，否则返回无结果（宁可失败，不误标）
+  - 第一季 / 电影：排除第 2 季及以后，优先剧名一致
+- 季度解析：`extract_season_info` 识别「第N季」「Season N」「SNN」；不识别「马大帅2」这类数字后缀
 
-调度器在应用启动时初始化，保存配置后自动重排。实现见 `__init__.py:_schedule_sync_job()`。
-外部调用 `reschedule_sync_job(app)` 可强制重排（路由保存配置后调用）。
+### 飞牛数据特征（实测）
 
-### 路由清单
+- 剧集基本都是标准层级；`episode` 直接挂在 `series` 下的扁平结构未见，扁平推断（`detect_season_groups`）基本不会触发
+- 重新刮削会遗留父节点已不存在的 `episode` / `season`，这类记录取不到层级，会被跳过
+- `item.douban_id` 在季层级不可靠（多季常共用第一季 ID），不使用
 
-页面：
-- `GET /` — 状态面板
-- `GET /config` — 配置页
-- `GET /history` — 同步日志
-- `GET /cookie-guide` — Cookie 提取指南
+## 豆瓣接口
 
-API：
-- `GET /api/sync/stream` — SSE 实时事件流
-- `POST /api/sync/run` — 触发同步
-- `GET /api/sync/status` — 同步状态
-- `GET /api/fntv/users` — 用户列表
-- `POST /api/fntv/test-db` — 数据库验证
-- `POST /api/douban/check-cookie` — Cookie 验证
-- `GET /api/config` — 获取当前配置（JSON）
-- `GET /api/stats` — 同步统计
+- Cookie 手动输入，`SimpleCookie` 解析；`ck` 只在缺失或 403 时刷新，403 后重试一次
+- 内部状态 `doing`/`done` 映射为豆瓣 `do`/`collect`，标记后回读核对实际状态
+- 搜索页链接格式按优先级解析：`subject/ID/` → `link2/?url=...` → `onclick` 中的 `sid`
 
-### 环境变量
+## 路由
 
-| 变量 | 用途 |
-|------|------|
-| `FNTV_DB_PATH` | 覆盖 config.yaml 的数据库路径 |
-| `SYNC_STATE_DIR` | 运行时数据目录（默认 ../sync_state） |
+页面：`/`、`/config`、`/history`、`/cookie-guide`
 
-### 智能跨季推断策略（fntv_db.py:detect_season_groups）
-
-优先走 `episode→season→series` 标准层级；失败时回退到 `episode→series` 扁平结构，
-通过分析全量 episode_number 的分布检测季度边界（数值回退 = 新季度）。
-
-### 播放百分比阈值
-
-在 `sync_engine._do_run()` 中计算 `play.position_seconds / (item.runtime_minutes * 60)`，
-低于 `watch_threshold_percent` 的跳过（runtime 缺失时不拦截）。
-
-### Cookie 处理模式
-
-参考 [MoviePilot DoubanHelper](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching)：
-- Cookie 来源：手动输入，SimpleCookie 解析
-- `_refresh_ck()` / `set_ck()` 只在 ck 缺失或 403 重试时调用，不每次验证都刷新
-- 无专门 auth 验证步骤——直接用 Cookie 操作，遇到 403 刷新 ck 后重试一次
-- 标记接口 403 → 刷新 ck → 重试一次，仍失败才返回 False
-
-### 豆瓣搜索兼容
-
-豆瓣搜索页存在多种链接格式，`_parse_search_result` 按优先级尝试：
-- 格式 A：直接链接 `subject/ID/`
-- 格式 B：跟踪链接 `link2/?url=...subject%2FID%2F...`（当前主流）
-- 格式 C：`onclick` 属性中的 `sid: ID`
-
-## 参考项目
-
-### [MoviePilot-Plugins/doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching)
-
-豆瓣同步插件的参考实现，核心文件 `DoubanHelper.py`：
-
-| 模式 | 做法 |
-|------|------|
-| Cookie 管理 | 静态 Cookie 字符串，SimpleCookie 解析 |
-| ck 刷新 | `set_ck()` GET 豆瓣首页，从 Set-Cookie 提取新 ck，只在缺失或 403 时调用 |
-| 搜索 | `get_subject_id(title)` → `/search?cat=1002` → BeautifulSoup 解析 `div.title > a` |
-| 标记 | `set_watching_status(sid, status)` → POST `/j/subject/{sid}/interest` → 403 时刷 ck 重试 |
-| 状态值 | `do`（在看）、`doing`（想看已纠正场）、`done`（看过）→ 对应 collect |
-| 代理 | 全局 `self.proxies` 参数，透传到所有 requests 调用 |
-| 死信重试 | `_wait_process` 字典持久化，每次成功同步后重试失败项 |
-
-### [fntv-record-view](https://github.com/QiaoKes/fntv-record-view)
-
-FNTV 播放记录查看器，核心文件 `main.py`：
-
-| 层面 | 做法 |
-|------|------|
-| 数据库访问 | SQLite `mode=ro` 只读连接，不挂载写权限 |
-| 层级查询 | **递归 CTE** 解析媒体树形层级，带深度限制防死循环 |
-| 播放进度 | `position / duration` 计算百分比，转为 `hh:mm:ss` 格式显示 |
-| 分页 | `LIMIT/OFFSET` 标准分页 |
-| 查询优化 | `functools.lru_cache` 或简单字典缓存减少重复查询 |
-| 安全 | 参数化查询防注入，错误日志记录不泄露路径 |
+API：`GET /api/sync/stream`（SSE）、`POST /api/sync/run`、`GET /api/sync/status`、`GET /api/fntv/users`、`POST /api/fntv/test-db`、`POST /api/douban/check-cookie`、`GET /api/config`、`GET /api/stats`、`POST /api/bark/test`
 
 ## 验证
 
 ```bash
-python -m app                    # 启动开发服务器
-# 打开 http://localhost:5000 手动验证
+python -m pytest -q   # 单元测试
+python -m app         # 开发服务器，http://localhost:5000
 ```
+
+## 发布
+
+改版本时同步更新 `CHANGELOG.md`、`app/templates/base.html` 侧栏版本号与 `tests/test_frontend.py`。推送 `vX.Y.Z` 标签触发镜像构建。
 
 ## 红线
 
 - 不修改飞牛影视数据库（只读挂载 + 临时副本）
 - 豆瓣 Cookie 不进 git
-- 不创建新的数据库表（只读 trimmedia.db）
+
+## 参考项目
+
+- [MoviePilot-Plugins/doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching)：Cookie / ck 刷新 / 搜索与标记接口
+- [fntv-record-view](https://github.com/QiaoKes/fntv-record-view)：飞牛数据库只读访问与层级查询
