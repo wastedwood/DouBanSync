@@ -139,33 +139,76 @@ class DoubanClient:
     def search_subject(self, title: str, season_number: int | None = None) -> tuple[str | None, str | None]:
         """搜索豆瓣条目，返回 (subject_name, subject_id)"""
         clean_search_title, title_season = extract_season_info(title)
-        target_season = season_number or title_season
+        candidates = self._search_candidates(title)
+        if not candidates:
+            return None, None
+        return self._select_best_candidate(candidates, clean_search_title,
+                                           season_number or title_season)
 
+    def search_season_parts(self, series_title: str, season_tag: str) -> list[tuple[str, str]]:
+        """按季标题搜索（如「最终季」「千年血战篇」），返回标题含剧名与季标题的候选条目"""
+        candidates = self._search_candidates(f"{series_title} {season_tag}")
+        return self._select_season_parts(candidates, series_title, season_tag)
+
+    def get_subject_abstract(self, subject_id: str) -> dict | None:
+        """读取条目摘要（含 is_tv、episodes_count），失败返回 None"""
+        url = f"https://movie.douban.com/j/subject_abstract?subject_id={subject_id}"
+        headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "movie.douban.com"}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                logger.warning("读取豆瓣条目摘要失败 [%d] sid=%s", resp.status_code, subject_id)
+                return None
+            return resp.json().get("subject") or None
+        except Exception as e:
+            logger.error("读取豆瓣条目摘要异常 sid=%s: %s", subject_id, e)
+            return None
+
+    def _search_candidates(self, title: str) -> list[tuple[str, str]]:
         url = f"https://www.douban.com/search?cat=1002&q={requests.utils.quote(title)}"
         headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "www.douban.com"}
         try:
             resp = requests.get(url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 logger.warning("豆瓣搜索失败 [%d]: %s", resp.status_code, title)
-                return None, None
+                return []
             # 检查是否被重定向到登录页（精确匹配域名，避免误杀）
             if any(d in resp.url.lower() for d in ["accounts.douban.com", "passport.douban"]):
                 logger.warning("搜索被重定向到登录页，Cookie 可能已过期: %s", title)
-                return None, None
+                return []
             # 验证码/空响应拦截
             if len(resp.text) < 500 or "captcha" in resp.text.lower():
                 logger.warning("豆瓣搜索请求被拦截(status=%d, len=%d): %s",
                                resp.status_code, len(resp.text), title)
-                return None, None
+                return []
             candidates = self._parse_search_results(resp.text)
             if not candidates:
                 logger.debug("搜索无结果，响应前200字符: %s", resp.text[:200].strip())
-                return None, None
-
-            return self._select_best_candidate(candidates, clean_search_title, target_season)
+            return candidates
         except Exception as e:
             logger.error("豆瓣搜索异常: %s", e)
-            return None, None
+            return []
+
+    @staticmethod
+    def _select_season_parts(candidates: list[tuple[str, str]], series_title: str,
+                             season_tag: str) -> list[tuple[str, str]]:
+        """保留标题同时含剧名与季标题的条目，按条目 ID 升序（即上线先后）
+
+        是否属于该季（Part.2、诀别谭算，完结篇剧场版、后续新篇不算）由调用方按集数判断。
+        """
+        series = series_title.lower().strip()
+        tag = season_tag.lower().strip()
+        # 飞牛「飙马野郎篇」在豆瓣上写作「飙马野郎」
+        core = tag[:-1] if len(tag) > 2 and tag[-1] in "篇章" else tag
+        if not series or not core or core in series:
+            return []
+
+        parts = [(name, sid) for name, sid in candidates
+                 if series in name.lower() and core in name.lower().replace(series, "", 1)]
+        if not parts:
+            logger.warning("豆瓣搜索结果中未找到「%s %s」条目 候选=%s",
+                           series_title, season_tag, [c[0] for c in candidates[:3]])
+        return sorted(parts, key=lambda p: int(p[1]))
 
     @classmethod
     def _select_best_candidate(cls, candidates: list[tuple[str, str]],
@@ -180,6 +223,13 @@ class DoubanClient:
             cand = cand_clean.lower().strip()
             return bool(cand) and (clean_target in cand or cand in clean_target)
 
+        def title_starts(cand_clean: str) -> bool:
+            # 剧名后只能接原名、年份等（以空格或标点分隔），「死神」不能匹配「死神少爷与黑女仆」
+            cand = cand_clean.lower().strip()
+            rest = cand[len(clean_target):]
+            return bool(clean_target) and cand.startswith(clean_target) and (
+                not rest or rest[0] in " ·:：-_(（[【")
+
         def sequel_number(name: str) -> int | None:
             # 豆瓣续作常以「剧名+数字」命名（如「马大帅2」），只认剧名完全一致的
             m = re.fullmatch(re.escape(clean_target) + r"\s*(\d{1,2})", name.lower().strip())
@@ -189,7 +239,7 @@ class DoubanClient:
         if target_season and target_season > 1:
             for name, sid in candidates:
                 cand_clean, cand_season = extract_season_info(name)
-                if ((cand_season == target_season and title_matches(cand_clean))
+                if ((cand_season == target_season and title_starts(cand_clean))
                         or sequel_number(name) == target_season):
                     return name, sid
             logger.warning("豆瓣搜索结果中未找到目标第 %d 季条目: search=%s 候选=%s",

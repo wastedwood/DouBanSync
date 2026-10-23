@@ -125,6 +125,8 @@ class SyncStore:
             rows = conn.execute(
                 """SELECT series_guid, season_number, douban_subject_id,
                           MAX(COALESCE(series_title, '')) AS series_title,
+                          MAX(max_ep_watched) AS max_ep_watched,
+                          MAX(total_episodes) AS total_episodes,
                           CASE WHEN SUM(status='done') > 0 THEN 'done' ELSE 'doing' END AS status
                    FROM sync_state
                    WHERE user_guid=? AND media_type='episode' AND status IN ('done','doing')
@@ -135,12 +137,13 @@ class SyncStore:
             return [dict(row) for row in rows]
 
     def update_season_subject(self, user_guid: str, series_guid: str, season_number: int,
-                              old_subject_id: str, new_subject_id: str):
+                              old_subject_id: str, new_subject_id: str, status: str):
         with self._connect() as conn:
             conn.execute(
-                """UPDATE sync_state SET douban_subject_id=?, last_synced_at=unixepoch()
-                   WHERE user_guid=? AND series_guid=? AND season_number=? AND douban_subject_id=?""",
-                (new_subject_id, user_guid, series_guid, season_number, old_subject_id)
+                """UPDATE sync_state SET douban_subject_id=?, status=?, last_synced_at=unixepoch()
+                   WHERE user_guid=? AND series_guid=? AND season_number=? AND douban_subject_id=?
+                     AND status IN ('done','doing')""",
+                (new_subject_id, status, user_guid, series_guid, season_number, old_subject_id)
             )
 
     def get_stats(self, user_guid: str) -> dict:

@@ -112,6 +112,39 @@ class CandidateSelectionTests(unittest.TestCase):
         self.assertEqual(DoubanClient._select_best_candidate(self.MADASHUAI, "马大帅", 1)[1], "2997297")
 
 
+class SeasonPartsSelectionTests(unittest.TestCase):
+    # 豆瓣搜索「进击的巨人 最终季」的实际返回顺序
+    AOT_FINAL = [
+        ("进击的巨人 最终季 完结篇 后篇", "36283000"),
+        ("进击的巨人 最终季 完结篇 前篇", "35853587"),
+        ("进击的巨人 最终季 Part.1", "33440021"),
+        ("进击的巨人 最终季 Part.2", "35290710"),
+        ("进击的巨人", "2154069"),
+    ]
+    JOJO = [
+        ("JOJO的奇妙冒险 飙马野郎", "36449242"),
+        ("JOJO的奇妙冒险 星尘斗士 埃及篇", "25984031"),
+        ("JOJO的奇妙冒险 石之海", "34605404"),
+    ]
+
+    def test_keeps_titles_with_season_tag_in_release_order(self):
+        parts = DoubanClient._select_season_parts(self.AOT_FINAL, "进击的巨人", "最终季")
+        self.assertEqual([sid for _, sid in parts],
+                         ["33440021", "35290710", "35853587", "36283000"])
+
+    def test_season_title_suffix_pian_is_optional(self):
+        parts = DoubanClient._select_season_parts(self.JOJO, "JOJO的奇妙冒险", "飙马野郎篇")
+        self.assertEqual(parts, [("JOJO的奇妙冒险 飙马野郎", "36449242")])
+
+    def test_other_show_with_same_season_title_is_not_matched(self):
+        self.assertEqual(DoubanClient._select_season_parts(self.AOT_FINAL, "海贼王", "最终季"), [])
+        self.assertEqual(DoubanClient._select_season_parts(self.AOT_FINAL, "进击的巨人", "巨人"), [])
+
+    def test_later_season_requires_same_series_title(self):
+        cands = [("死神少爷与黑女仆 第二季", "35605985"), ("死神", "1460932")]
+        self.assertEqual(DoubanClient._select_best_candidate(cands, "死神", 2), (None, None))
+
+
 class MarkInterestTests(unittest.TestCase):
     @staticmethod
     def _response():

@@ -79,6 +79,34 @@ class ItemClassificationTests(unittest.TestCase):
         self.assertIsNotNone(flat)
         self.assertEqual(flat["season_number"], 2)
 
+    def test_season_skips_empty_season_nodes(self):
+        rows = [
+            ("aot", None, None, None, "进击的巨人"),
+            ("s4-old", "aot", 4, None, "第 4 季"),  # 重新刮削遗留，下面没有单集
+            ("s4", "aot", 4, None, "最终季"),
+            ("ep-1", "s4", 4, 1, "第1集"),
+        ]
+        self.conn.executemany("INSERT INTO item VALUES (?, ?, ?, ?, ?)", rows)
+
+        fntv = FntvDb.__new__(FntvDb)
+        self.assertEqual(fntv.get_season(self.conn, "aot", 4), {"guid": "s4", "title": "最终季"})
+        self.assertIsNone(fntv.get_season(self.conn, "aot", 5))
+
+    def test_season_total_uses_planned_episodes_for_ongoing_season(self):
+        # 季节点的 episode_number 是刮削到的计划集数
+        rows = [
+            ("jojo-6", "jojo", 6, 12, "飙马野郎篇"),
+            ("ep-1", "jojo-6", 6, 1, "第1集"),
+            ("ep-2", "jojo-6", 6, 2, "第2集"),
+            ("mds-1", "mds", 1, 27, "第 1 季"),
+        ] + [(f"mds-ep-{i}", "mds-1", 1, i, "") for i in range(1, 30)]
+        self.conn.executemany("INSERT INTO item VALUES (?, ?, ?, ?, ?)", rows)
+
+        fntv = FntvDb.__new__(FntvDb)
+        self.assertEqual(fntv.get_season_total_episodes(self.conn, "jojo-6"), 12)
+        # 本地集数多于计划集数时以本地为准
+        self.assertEqual(fntv.get_season_total_episodes(self.conn, "mds-1"), 29)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -140,30 +140,138 @@ class SpecialSeasonTests(unittest.TestCase):
         store.log_action.assert_any_call(ANY, "skip_special", "ep-36", "进击的巨人", "特别篇不同步")
 
 
+@patch("app.sync_engine.DoubanClient")
+class PlayProgressTests(unittest.TestCase):
+    """有进度但未达阈值算在看；剧集最后一集看完才算看过"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.store = SyncStore(self._tmp.name)
+        for marker in ("douban_interest_mapping_v2:u", "season_subject_repair_v3:u"):
+            self.store.set_config(marker, "1")
+        self.fntv = MagicMock()
+        self.engine = SyncEngine(self.fntv, self.store, "ck=x")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run(self, client_cls, minutes, watched=0, item="movie-1", episode=None):
+        client = client_cls.return_value
+        client.check_auth.return_value = True
+        client.search_subject.return_value = ("片名", "100")
+        client.mark_interest.reset_mock()
+        client.mark_interest.return_value = True
+        self.fntv.get_new_plays.return_value = [{
+            "item_guid": item, "title": "片名", "original_title": "", "position_seconds": minutes * 60,
+            "watched": watched, "play_update_time": minutes + 1, "episode_number": episode,
+            "runtime_minutes": 100,
+        }]
+        self.engine.run("u")
+        return [c.args[:2] for c in client.mark_interest.call_args_list]
+
+    def test_movie_partial_is_doing_then_done(self, client_cls):
+        self.fntv.classify_item.return_value = ItemCategory.MOVIE
+        self.assertEqual(self._run(client_cls, 30), [("100", "doing")])
+        self.assertEqual(self.store.get_state("u", "movie-1")["status"], "doing")
+        # 仍未看完：不重复调用豆瓣
+        self.assertEqual(self._run(client_cls, 50), [])
+        self.assertEqual(self._run(client_cls, 95), [("100", "done")])
+        self.assertEqual(self.store.get_state("u", "movie-1")["status"], "done")
+
+    def test_zero_progress_is_ignored(self, client_cls):
+        self.fntv.classify_item.return_value = ItemCategory.MOVIE
+        self.assertEqual(self._run(client_cls, 0), [])
+        self.assertIsNone(self.store.get_state("u", "movie-1"))
+
+    def test_final_episode_not_finished_is_doing(self, client_cls):
+        self.fntv.classify_item.return_value = ItemCategory.EPISODE
+        self.fntv.get_series_hierarchy.return_value = {
+            "series_guid": "tv", "season_guid": "s1", "season_number": 1,
+            "season_title": "第 1 季", "series_title": "某剧"}
+        self.fntv.get_season_total_episodes.return_value = 12
+        self.fntv.get_season_max_watched.return_value = 11
+        marks = self._run(client_cls, 40, item="ep-12", episode=12)
+        self.assertEqual(marks, [("100", "doing")])
+        self.assertEqual(self.store.get_state("u", "ep-12")["max_ep_watched"], 11)
+
+
+# 豆瓣实测数据：搜索「剧名 季标题」的候选，以及各条目摘要
+DOUBAN_SEARCH = {
+    ("进击的巨人", "最终季"): [
+        ("进击的巨人 最终季 完结篇 后篇", "36283000"),
+        ("进击的巨人 最终季 完结篇 前篇", "35853587"),
+        ("进击的巨人 最终季 Part.1", "33440021"),
+        ("进击的巨人 最终季 Part.2", "35290710"),
+    ],
+    ("死神", "千年血战篇"): [
+        ("死神 千年血战篇", "35001432"),
+        ("死神 千年血战篇 -祸进谭-", "36189165"),
+        ("死神 千年血战篇 -相克谭-", "36189164"),
+        ("死神 千年血战篇 -诀别谭-", "36189163"),
+    ],
+    ("JOJO的奇妙冒险", "飙马野郎篇"): [("JOJO的奇妙冒险 飙马野郎", "36449242")],
+}
+DOUBAN_ABSTRACT = {
+    "33440021": {"is_tv": True, "episodes_count": "16"},
+    "35290710": {"is_tv": True, "episodes_count": "12"},
+    "35853587": {"is_tv": False, "episodes_count": ""},
+    "36283000": {"is_tv": False, "episodes_count": ""},
+    "35001432": {"is_tv": True, "episodes_count": "13"},
+    "36189163": {"is_tv": True, "episodes_count": "13"},
+    "36189164": {"is_tv": True, "episodes_count": "14"},
+    "36189165": {"is_tv": True, "episodes_count": "13"},
+    "36449242": {"is_tv": True, "episodes_count": ""},
+}
+
+
+def douban_client_mock():
+    client = MagicMock()
+    client.search_season_parts.side_effect = lambda series, tag: sorted(
+        DOUBAN_SEARCH.get((series, tag), []), key=lambda c: int(c[1]))
+    client.get_subject_abstract.side_effect = DOUBAN_ABSTRACT.get
+    client.mark_interest.return_value = True
+    return client
+
+
 class SeasonSubjectRepairTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.store = SyncStore(self._tmp.name)
         rows = [
-            # (item, series, season, title, status, sid)
-            ("bcs-1", "bcs", 1, "风骚律师", "done", "25726259"),
-            ("bcs-2", "bcs", 2, "风骚律师", "done", "25726259"),
-            ("aot-2", "aot", 2, "进击的巨人", "done", "23748525"),
-            ("mds-2", "mds", 2, "马大帅", "doing", "2997297"),
-            ("bng-2", "bng", 2, "百年孤独", "done", "30482958"),
+            # (item, series, season, title, status, sid, 已看到, 总集数)
+            ("bcs-1", "bcs", 1, "风骚律师", "done", "25726259", 10, 10),
+            ("bcs-2", "bcs", 2, "风骚律师", "done", "25726259", 10, 10),
+            ("aot-2", "aot", 2, "进击的巨人", "done", "23748525", 12, 12),
+            ("mds-2", "mds", 2, "马大帅", "doing", "2997297", 3, 30),
+            ("bng-2", "bng", 2, "百年孤独", "done", "30482958", 8, 8),
+            ("aot-4", "aot", 4, "进击的巨人", "done", "23748525", 28, 28),
+            ("bleach-2", "bleach", 2, "死神", "doing", "35605985", 30, 40),
+            # 连载中：同步时本地只有已播出的集，被判为看完
+            ("jojo-6", "jojo", 6, "JOJO的奇妙冒险", "done", "11498785", 1, 1),
+            ("qs-1", "qs", 1, "棋士", "done", "37000001", 11, 11),
         ]
-        for item, series, season, title, status, sid in rows:
+        for item, series, season, title, status, sid, watched, total in rows:
             self.store.upsert_state("u", item, media_type="episode", series_guid=series,
                                     season_number=season, series_title=title,
-                                    status=status, douban_subject_id=sid)
-        self.client = MagicMock()
+                                    status=status, douban_subject_id=sid,
+                                    max_ep_watched=watched, total_episodes=total)
+        self.client = douban_client_mock()
         self.client.search_subject.side_effect = lambda title, season_number=None: {
             "风骚律师 第二季": ("风骚律师 第二季", "26647117"),
             "进击的巨人 第二季": ("进击的巨人 第二季", "26816519"),
             "马大帅 第二季": ("马大帅 第二季", "1966880"),
         }.get(title, (None, None))
-        self.client.mark_interest.return_value = True
-        self.engine = SyncEngine(MagicMock(), self.store, "ck=x")
+        season_titles = {("aot", 4): "最终季", ("bleach", 2): "千年血战篇", ("mds", 2): "Ⅱ",
+                         ("jojo", 6): "飙马野郎篇"}
+        planned_episodes = {"jojo-6": 12, "qs-1": 22}
+        live_watched = {"jojo-6": 5}  # 飞牛当前已看到的集数（同步记录之后又看了几集）
+        fntv = MagicMock()
+        fntv.get_season.side_effect = lambda conn, series, season: {
+            "guid": f"{series}-{season}",
+            "title": season_titles.get((series, season), f"第 {season} 季")}
+        fntv.get_season_total_episodes.side_effect = lambda conn, guid: planned_episodes.get(guid, 0)
+        fntv.get_season_max_watched.side_effect = lambda conn, user, guid: live_watched.get(guid, 0)
+        self.engine = SyncEngine(fntv, self.store, "ck=x")
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -182,7 +290,36 @@ class SeasonSubjectRepairTests(unittest.TestCase):
         self.assertEqual(self._sid("bng-2"), "30482958")
         self.client.mark_interest.assert_any_call("26647117", "done", True)
         self.client.mark_interest.assert_any_call("1966880", "doing", True)
-        self.assertEqual(self.client.mark_interest.call_count, 3)
+
+    def test_split_season_marks_parts_by_episode_count(self):
+        self.engine._repair_season_subjects("run", self.client, "u")
+        marks = [c.args[:2] for c in self.client.mark_interest.call_args_list]
+
+        # 最终季 28 集 = Part.1(16) + Part.2(12)，完结篇不是剧集，不标
+        self.assertEqual(self._sid("aot-4"), "33440021")
+        self.assertIn(("33440021", "done"), marks)
+        self.assertIn(("35290710", "done"), marks)
+        self.assertNotIn("35853587", [m[0] for m in marks])
+        # 千年血战篇看到第 30 集：前两部（26 集）看过，相克谭在看，祸进谭不属于该季
+        self.assertEqual(self._sid("bleach-2"), "35001432")
+        self.assertIn(("35001432", "done"), marks)
+        self.assertIn(("36189163", "done"), marks)
+        self.assertIn(("36189164", "doing"), marks)
+        self.assertNotIn("36189165", [m[0] for m in marks])
+
+    def test_rematched_season_status_follows_final_episode(self):
+        self.engine._repair_season_subjects("run", self.client, "u")
+        marks = [c.args[:2] for c in self.client.mark_interest.call_args_list]
+
+        # 飙马野郎篇计划 12 集、飞牛当前看到第 5 集：改配到正确条目，最后一集没看完是在看
+        state = self.store.get_state("u", "jojo-6")
+        self.assertEqual((state["douban_subject_id"], state["status"]), ("36449242", "doing"))
+        self.assertIn(("36449242", "doing"), marks)
+        # 条目没变的季不动原有状态（本地删片导致记录不全时不误改）
+        state = self.store.get_state("u", "qs-1")
+        self.assertEqual((state["douban_subject_id"], state["status"]), ("37000001", "done"))
+        self.assertNotIn("37000001", [m[0] for m in marks])
+        self.assertEqual(self.store.get_state("u", "bng-2")["status"], "done")
 
     def test_runs_once(self):
         self.engine._repair_season_subjects("run", self.client, "u")
@@ -194,7 +331,89 @@ class SeasonSubjectRepairTests(unittest.TestCase):
         self.client.mark_interest.return_value = False
         self.engine._repair_season_subjects("run", self.client, "u")
         self.assertEqual(self._sid("bcs-2"), "25726259")
-        self.assertNotEqual(self.store.get_config("season_subject_repair_v2:u"), "1")
+        self.assertNotEqual(self.store.get_config("season_subject_repair_v3:u"), "1")
+
+
+class SeasonTitleSearchTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = SyncEngine(MagicMock(), MagicMock(), "ck=x")
+        self.client = douban_client_mock()
+        self.client.search_subject.return_value = ("X 第二季", "111")
+
+    def test_season_tag_ignores_generic_titles(self):
+        self.assertEqual(SyncEngine._season_tag("进击的巨人", "最终季"), "最终季")
+        self.assertEqual(SyncEngine._season_tag("进击的巨人", "进击的巨人 最终季"), "最终季")
+        for generic in ("第 2 季", "第二季", "Season 3", "Ⅱ", "III", "2", "", None):
+            self.assertEqual(SyncEngine._season_tag("进击的巨人", generic), "")
+
+    def test_parts_stop_at_season_episode_total(self):
+        parts = self.engine._season_parts(self.client, "死神", 2, "千年血战篇", 40)
+        self.assertEqual(parts, [("35001432", 13), ("36189163", 13), ("36189164", 14)])
+        parts = self.engine._season_parts(self.client, "进击的巨人", 4, "最终季", 16)
+        self.assertEqual(parts, [("33440021", 16)])
+
+    def test_unknown_episode_count_takes_single_subject(self):
+        parts = self.engine._season_parts(self.client, "JOJO的奇妙冒险", 6, "飙马野郎篇", 5)
+        self.assertEqual(parts, [("36449242", 0)])
+
+    def test_abstract_failure_gives_up_title_match(self):
+        self.client.get_subject_abstract.side_effect = None
+        self.client.get_subject_abstract.return_value = None
+        self.assertEqual(self.engine._season_parts(self.client, "死神", 2, "千年血战篇", 40), [])
+
+    def test_falls_back_to_season_number_when_title_unmatched(self):
+        parts = self.engine._search_tv_subjects(self.client, "X", 2, "无名篇", 10)
+        self.assertEqual(parts, [("111", 0)])
+        self.client.search_subject.assert_called_once_with("X 第二季", season_number=2)
+
+    def test_first_season_never_uses_season_title(self):
+        self.engine._search_tv_subjects(self.client, "JOJO的奇妙冒险", 1, "幻影之血", 26)
+        self.client.search_season_parts.assert_not_called()
+
+    def test_progress_maps_to_parts(self):
+        parts = [("p1", 16), ("p2", 12)]
+        self.assertEqual(SyncEngine._part_interests(parts, "doing", 3), [("p1", "doing")])
+        self.assertEqual(SyncEngine._part_interests(parts, "doing", 20),
+                         [("p1", "done"), ("p2", "doing")])
+        self.assertEqual(SyncEngine._part_interests(parts, "done", 28),
+                         [("p1", "done"), ("p2", "done")])
+        self.assertEqual(SyncEngine._part_interests([("x", 0)], "doing", 5), [("x", "doing")])
+
+    def test_mark_failure_returns_empty(self):
+        self.client.mark_interest.return_value = False
+        self.assertEqual(self.engine._mark_season(self.client, [("p1", 16)], "done", 16), [])
+
+
+class SeasonPartsCompletionTests(unittest.TestCase):
+    """本地只记了主条目，看完时按集数补齐其余分部"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.store = SyncStore(self._tmp.name)
+        self.store.upsert_state("u", "aot-4-20", media_type="episode", series_guid="aot",
+                                season_number=4, series_title="进击的巨人",
+                                status="doing", douban_subject_id="33440021")
+        self.fntv = MagicMock()
+        self.fntv.get_season_total_episodes.return_value = 28
+        self.fntv.get_season_max_watched.return_value = 28
+        self.client = douban_client_mock()
+        self.engine = SyncEngine(self.fntv, self.store, "ck=x")
+        self.engine._stats = {"done": 0, "doing": 0, "failed": 0, "skipped": 0}
+        self.engine._summary_items = {}
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_completion_marks_remaining_parts(self):
+        info = {"series_guid": "aot", "season_guid": "s4", "season_number": 4,
+                "season_title": "最终季", "series_title": "进击的巨人"}
+        play = {"item_guid": "aot-4-28", "episode_number": 28, "play_update_time": 1}
+        self.engine._process_tv_group("run", self.client, "u", info, [play])
+
+        marks = [c.args[:2] for c in self.client.mark_interest.call_args_list]
+        self.assertEqual(marks, [("33440021", "done"), ("35290710", "done")])
+        state = self.store.get_state("u", "aot-4-28")
+        self.assertEqual((state["douban_subject_id"], state["status"]), ("33440021", "done"))
 
 
 if __name__ == "__main__":

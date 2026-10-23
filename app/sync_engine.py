@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import re
 import uuid
 import threading
 from datetime import datetime
@@ -33,6 +34,11 @@ SUMMARY_SECTIONS = (
 )
 
 MAX_SUMMARY_ITEMS = 3
+
+MAX_SEASON_CANDIDATES = 8  # 按季标题匹配时最多核对的豆瓣条目数
+
+# 飞牛季标题只是「Ⅱ」「III」这类序号时，按季号搜索
+ROMAN_NUMERAL_REGEX = re.compile(r"[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+|[IVX]+")
 
 
 class SyncEngine:
@@ -127,6 +133,78 @@ class SyncEngine:
             return f"{clean_title} {cls._season_label(effective_season)}"
         return clean_title
 
+    @staticmethod
+    def _season_tag(clean_title: str, season_title: str | None) -> str:
+        """飞牛季标题不是「第 N 季」这类通用写法时（如「最终季」「飙马野郎篇」），返回它作为豆瓣搜索的季标签"""
+        tag = (season_title or "").strip()
+        if clean_title and tag.startswith(clean_title):
+            tag = tag[len(clean_title):].strip()
+        if not tag or extract_season_info(tag)[1] or tag.isdigit() or ROMAN_NUMERAL_REGEX.fullmatch(tag):
+            return ""
+        return tag
+
+    def _season_parts(self, client: DoubanClient, series_title: str, season_number: int | None,
+                      season_title: str | None, total_eps: int) -> list[tuple[str, int]]:
+        """第 2 季及以后按季标题找出该季在豆瓣上的条目，返回 [(条目 ID, 集数)]，按上线先后
+
+        豆瓣常把一季拆成多个条目（Part.1/Part.2、诀别谭/相克谭），按集数累计对齐飞牛该季总集数：
+        非剧集条目（剧场版、完结篇）跳过，累计达到总集数即止，之后的新篇不算该季。
+        """
+        clean_title, season = self._resolve_season(series_title, season_number)
+        tag = self._season_tag(clean_title, season_title) if season and season > 1 else ""
+        if not tag:
+            return []
+        parts, covered = [], 0
+        for _, sid in client.search_season_parts(clean_title, tag)[:MAX_SEASON_CANDIDATES]:
+            abstract = client.get_subject_abstract(sid)
+            if abstract is None:
+                return []  # 读不到集数就无法对齐，宁可放弃也不误标
+            if not abstract.get("is_tv"):
+                continue
+            count = str(abstract.get("episodes_count") or "")
+            eps = int(count) if count.isdigit() else 0
+            parts.append((sid, eps))
+            covered += eps
+            if not eps or not total_eps or covered >= total_eps:
+                break
+        return parts
+
+    def _search_tv_subjects(self, client: DoubanClient, series_title: str,
+                            season_number: int | None, season_title: str | None = "",
+                            total_eps: int = 0, is_inferred: bool = False) -> list[tuple[str, int]]:
+        """搜索某季对应的豆瓣条目 [(条目 ID, 集数)]，首个为主条目；季标题匹配不到时按季号搜索"""
+        parts = self._season_parts(client, series_title, season_number, season_title, total_eps)
+        if parts:
+            return parts
+        _, season = self._resolve_season(series_title, season_number)
+        search_title = self._build_tv_search_title(series_title, season_number, is_inferred)
+        _, sid = client.search_subject(search_title, season_number=season)
+        return [(sid, 0)] if sid else []
+
+    @staticmethod
+    def _part_interests(parts: list[tuple[str, int]], interest: str,
+                        max_watched: int) -> list[tuple[str, str]]:
+        """把一季的进度映射到豆瓣各分部：看完的分部标看过，正在看的分部标在看"""
+        if interest == "done":
+            return [(sid, "done") for sid, _ in parts]
+        result, watched_before = [], 0
+        for sid, eps in parts:
+            if eps and watched_before + eps <= max_watched:
+                result.append((sid, "done"))
+                watched_before += eps
+            else:
+                result.append((sid, "doing"))
+                break
+        return result
+
+    def _mark_season(self, client: DoubanClient, parts: list[tuple[str, int]],
+                     interest: str, max_watched: int) -> list[str]:
+        """按进度标记该季的豆瓣条目，返回「ID(状态)」列表，任一失败返回空列表"""
+        targets = self._part_interests(parts, interest, max_watched)
+        if all(client.mark_interest(sid, status, self._private) for sid, status in targets):
+            return [f"{sid}({status})" for sid, status in targets]
+        return []
+
     # ── 主同步流程 ───────────────────────────────────
 
     def run(self, user_guid: str) -> str:
@@ -174,30 +252,25 @@ class SyncEngine:
 
         logger.info("[%s] 发现 %d 条新播放记录", run_id, len(plays))
 
-        # 1) 播放百分比阈值过滤
+        # 1) 播放进度判定：达到阈值（或飞牛标记已看）算看完，未达阈值算在看，没有进度的忽略
         threshold = int(self._store.get_config("watch_threshold_percent", "90"))
-        if threshold > 0:
-            before = len(plays)
-            kept = []
-            for p in plays:
-                pct, ok = self._calc_watch_pct(p)
-                if ok:
-                    p["_watch_pct"] = round(pct, 1)
-                    if pct < threshold:
-                        logger.info("[%s] 播放不足阈值 %.1f%% < %d%%: %s",
-                                    run_id, pct, threshold, p.get("title", ""))
-                        self._log(run_id, "skip_threshold", p["item_guid"],
-                                  p.get("title", ""), f"播放 {pct:.1f}% < 阈值 {threshold}%")
-                        continue
-                kept.append(p)
-            plays = kept
-            filtered = before - len(plays)
-            if filtered:
-                logger.info("[%s] 播放阈值过滤: %d/%d 跳过", run_id, filtered, before)
+        kept = []
+        for p in plays:
+            pct, ok = self._calc_watch_pct(p)
+            if ok:
+                p["_watch_pct"] = round(pct, 1)
+                if pct <= 0:
+                    continue
+            p["_complete"] = not ok or pct >= threshold
+            if not p["_complete"]:
+                logger.info("[%s] 播放未达阈值 %.1f%% < %d%%，按在看处理: %s",
+                            run_id, pct, threshold, p.get("title", ""))
+            kept.append(p)
+        plays = kept
 
         if not plays:
             logger.info("[%s] 过滤后无剩余播放记录", run_id)
-            self._log(run_id, "all_filtered", detail=f"全部未达阈值 {threshold}%")
+            self._log(run_id, "all_filtered", detail="播放进度均为 0")
             self._emit(run_id, "sync_end", success=True)
             return run_id
 
@@ -319,37 +392,54 @@ class SyncEngine:
 
     def _repair_season_subjects(self, run_id: str, client: DoubanClient,
                                 user_guid: str):
-        """一次性修复 v0.2.2 之前第 2 季及以后误标到第一季条目的记录
+        """一次性修复已同步电视剧季的豆瓣条目与状态
 
-        只在重新搜索能找到不同的目标季条目时才改标；找不到则保持原样，避免误伤。
-        原先被误标的第一季条目不撤销，由用户自行核对。
+        第 2 季及以后误标到第一季或其他剧的条目：重新搜索（按季标题 / 季号），找到不同条目才改标，
+        并按飞牛当前进度重算状态（最后一集看完才算看过）；找不到则保持原样。
+        原先误标的条目不撤销，由用户自行核对。
         """
-        marker = f"season_subject_repair_v2:{user_guid}"
+        marker = f"season_subject_repair_v3:{user_guid}"
         if self._store.get_config(marker, "") == "1":
             return
 
         checked = repaired = failed = 0
-        for group in self._store.get_season_subjects(user_guid):
-            series_title = group["series_title"]
-            _, season = self._resolve_season(series_title, group["season_number"])
-            if not season or season <= 1:
-                continue
-            checked += 1
-            old_sid = group["douban_subject_id"]
-            search_title = self._build_tv_search_title(series_title, group["season_number"])
-            _, new_sid = client.search_subject(search_title, season_number=season)
-            if not new_sid or new_sid == old_sid:
-                continue
-            if not client.mark_interest(new_sid, group["status"], self._private):
-                failed += 1
-                logger.warning("[%s] 多季条目修复失败: %s sid=%s",
-                               run_id, search_title, new_sid)
-                continue
-            self._store.update_season_subject(user_guid, group["series_guid"],
-                                              group["season_number"], old_sid, new_sid)
-            self._log(run_id, "repair_subject", group["series_guid"], search_title,
-                      f"豆瓣ID {old_sid} → {new_sid}（{group['status']}）")
-            repaired += 1
+        conn = self._fntv.get_conn()
+        try:
+            for group in self._store.get_season_subjects(user_guid):
+                series_title = group["series_title"]
+                _, season = self._resolve_season(series_title, group["season_number"])
+                if not season or season <= 1:
+                    continue
+                checked += 1
+                old_sid = group["douban_subject_id"]
+                watched = group["max_ep_watched"] or 0
+                total = group["total_episodes"] or 0
+                season_row = self._fntv.get_season(conn, group["series_guid"],
+                                                   group["season_number"]) or {}
+                if season_row:
+                    watched = max(watched, self._fntv.get_season_max_watched(
+                        conn, user_guid, season_row["guid"]))
+                    total = max(total, self._fntv.get_season_total_episodes(conn, season_row["guid"]))
+
+                search_title = self._build_tv_search_title(series_title, group["season_number"])
+                parts = self._search_tv_subjects(client, series_title, group["season_number"],
+                                                 season_row.get("title", ""), total)
+                if not parts or parts[0][0] == old_sid:
+                    continue
+                status = ("done" if watched >= total else "doing") if total else group["status"]
+                marked = self._mark_season(client, parts, status, watched)
+                if not marked:
+                    failed += 1
+                    logger.warning("[%s] 电视剧季修复失败: %s sid=%s", run_id, search_title,
+                                   ",".join(sid for sid, _ in parts))
+                    continue
+                self._store.update_season_subject(user_guid, group["series_guid"],
+                                                  group["season_number"], old_sid, parts[0][0], status)
+                self._log(run_id, "repair_subject", group["series_guid"], search_title,
+                          f"豆瓣ID {old_sid} → {'、'.join(marked)} ep={watched}/{total}")
+                repaired += 1
+        finally:
+            conn.close()
 
         if not failed:
             self._store.set_config(marker, "1")
@@ -397,13 +487,21 @@ class SyncEngine:
         item_guid = play["item_guid"]
         title = play["title"] or play["original_title"] or "未知片名"
 
+        # 达到阈值算看过，有进度但未达阈值算在看
+        interest = "done" if play.get("_complete", True) else "doing"
         state = self._store.get_state(user_guid, item_guid)
         if state and state["status"] == "done":
             self._log(run_id, "skip_done", item_guid, title, "电影已标记过")
             self._stats["skipped"] += 1
             return
+        if state and state["status"] == "doing" and interest == "doing":
+            self._log(run_id, "skip_done", item_guid, title, "电影已标记在看")
+            self._stats["skipped"] += 1
+            return
 
-        name, sid = client.search_subject(title)
+        sid = state.get("douban_subject_id") if state else None
+        if not sid:
+            _, sid = client.search_subject(title)
         if not sid:
             logger.warning("[%s] 豆瓣搜索无结果: %s", run_id, title)
             self._store.upsert_state(user_guid, item_guid, media_type="movie",
@@ -413,15 +511,15 @@ class SyncEngine:
             self._stats["failed"] += 1
             return
 
-        ok = client.mark_interest(sid, "done", self._private)
+        ok = client.mark_interest(sid, interest, self._private)
         if ok:
             self._store.upsert_state(user_guid, item_guid,
-                                     media_type="movie", status="done",
+                                     media_type="movie", status=interest,
                                      douban_subject_id=sid,
                                      play_update_time=play["play_update_time"])
-            self._log(run_id, "mark_done", item_guid, title, f"豆瓣ID={sid}")
-            logger.info("[%s] 电影标记看过: %s", run_id, title)
-            self._stats["done"] += 1
+            self._log(run_id, f"mark_{interest}", item_guid, title, f"豆瓣ID={sid}")
+            logger.info("[%s] 电影标记%s: %s", run_id, "看过" if interest == "done" else "在看", title)
+            self._stats[interest] += 1
         else:
             self._store.upsert_state(user_guid, item_guid,
                                      media_type="movie", status="failed",
@@ -441,18 +539,21 @@ class SyncEngine:
         series_title = info["series_title"] or "未知剧集"
 
         conn = self._fntv.get_conn()
+        # 未达阈值的单集只说明在看，不计入看到第几集
+        played_max = max((p.get("episode_number") or 0 for p in plays
+                          if p.get("_complete", True)), default=0)
 
         if is_inferred and info.get("_total_eps_override"):
             # 扁平回退场景：使用推断的 total_eps
             total_eps = info["_total_eps_override"]
-            max_watched = max(p.get("episode_number") or 0 for p in plays)
+            max_watched = played_max
         elif season_guid:
             total_eps = self._fntv.get_season_total_episodes(conn, season_guid)
             max_watched = self._fntv.get_season_max_watched(conn, user_guid, season_guid)
         else:
             # 最极端回退：没有 season_guid
             total_eps = 0
-            max_watched = max(p.get("episode_number") or 0 for p in plays)
+            max_watched = played_max
         conn.close()
 
         current_status = self._store.get_series_status(user_guid, series_guid,
@@ -465,22 +566,23 @@ class SyncEngine:
             return
 
         # 搜索豆瓣
-        subject_id = None
+        season_title = info.get("season_title") or ""
+        parts = []
         for play in plays:
             st = self._store.get_state(user_guid, play["item_guid"])
             if st and st.get("douban_subject_id"):
-                subject_id = st["douban_subject_id"]
+                parts = [(st["douban_subject_id"], 0)]
                 break
+        from_store = bool(parts)
 
-        if not subject_id:
-            # 智能搜索：多季剧集附加季度标签，避免豆瓣默认返回第一季
-            _, effective_season = self._resolve_season(series_title, season_number)
+        if not parts:
+            # 智能搜索：优先按季标题，否则附加季度标签，避免豆瓣默认返回第一季
             search_title = self._build_tv_search_title(
                 series_title, season_number, is_inferred
             )
-
-            name, subject_id = client.search_subject(search_title, season_number=effective_season)
-            if not subject_id:
+            parts = self._search_tv_subjects(client, series_title, season_number,
+                                             season_title, total_eps, is_inferred)
+            if not parts:
                 logger.warning("[%s] 豆瓣搜索无结果: %s", run_id, search_title)
                 for play in plays:
                     self._store.upsert_state(user_guid, play["item_guid"],
@@ -495,11 +597,11 @@ class SyncEngine:
                           "豆瓣搜索无结果")
                 self._stats["failed"] += 1
                 return
+        subject_id = parts[0][0]
 
         # 决定跃迁
         if not is_inferred or not info.get("_total_eps_override"):
-            max_watched = max(max_watched,
-                              max(p.get("episode_number") or 0 for p in plays))
+            max_watched = max(max_watched, played_max)
 
         is_complete = total_eps > 0 and max_watched >= total_eps
 
@@ -518,8 +620,13 @@ class SyncEngine:
             interest = None
 
         if interest:
-            ok = client.mark_interest(subject_id, interest, self._private)
-            if not ok:
+            if from_store:
+                # 本地只记了主条目，重新按季标题对齐豆瓣各分部
+                parts = self._season_parts(client, series_title, season_number,
+                                           season_title, total_eps) or parts
+            subject_id = parts[0][0]
+            marked = self._mark_season(client, parts, interest, max_watched)
+            if not marked:
                 for play in plays:
                     self._store.upsert_state(user_guid, play["item_guid"],
                                              media_type="episode",
@@ -539,7 +646,7 @@ class SyncEngine:
                 return
             action = "mark_done" if interest == "done" else "mark_doing"
             self._log(run_id, action, series_guid, series_title,
-                      f"豆瓣ID={subject_id} ep={max_watched}/{total_eps}")
+                      f"豆瓣ID={','.join(marked)} ep={max_watched}/{total_eps}")
             logger.info("[%s] %s: %s (%s)", run_id, action, series_title, interest)
             if interest == "done":
                 self._stats["done"] += 1

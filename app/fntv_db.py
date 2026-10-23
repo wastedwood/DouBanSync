@@ -222,12 +222,28 @@ class FntvDb:
     # ── 季度查询 ──────────────────────────────────────────
 
     def get_season_total_episodes(self, conn, season_guid: str) -> int:
-        """获取某季的总集数"""
+        """获取某季的总集数：本地已入库集数与刮削到的计划集数取大
+
+        连载中的季本地只有已播出的几集，只按入库集数算会把追更中的季误判为看完。
+        """
         row = conn.execute(
-            "SELECT COUNT(*) AS c FROM item WHERE parent_guid = ? AND episode_number IS NOT NULL",
-            (season_guid,)
+            """SELECT MAX(
+                   (SELECT COUNT(*) FROM item WHERE parent_guid = :guid AND episode_number IS NOT NULL),
+                   COALESCE((SELECT episode_number FROM item WHERE guid = :guid), 0)) AS c""",
+            {"guid": season_guid}
         ).fetchone()
         return row["c"] if row else 0
+
+    def get_season(self, conn, series_guid: str, season_number: int) -> dict | None:
+        """获取某季节点 {guid, title}（标题如「第 2 季」「最终季」），只取下面挂有单集的季节点"""
+        row = conn.execute(
+            """SELECT season.guid, COALESCE(season.title, '') AS title FROM item AS season
+               WHERE season.parent_guid = ? AND season.season_number = ?
+                 AND EXISTS (SELECT 1 FROM item AS ep WHERE ep.parent_guid = season.guid)
+               LIMIT 1""",
+            (series_guid, season_number)
+        ).fetchone()
+        return dict(row) if row else None
 
     def get_season_max_watched(self, conn, user_guid: str, season_guid: str) -> int:
         """获取用户在某季已看过的最大集号"""
