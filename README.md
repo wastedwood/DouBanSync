@@ -1,98 +1,101 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.13+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/Flask-3.0+-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask">
-  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
-</p>
-
-<p align="center"><img src="app/static/img/brand-mark.svg" alt="DouBanSync Logo" width="68"></p>
+<p align="center"><img src="app/static/img/brand-mark.svg" alt="DouBanSync" width="68"></p>
 <h1 align="center">DouBanSync</h1>
-<h3 align="center">飞牛影视 → 豆瓣 · 观看记录自动同步工具</h3>
-
-<p align="center">
-  将 <strong>飞牛影视 (FNTV)</strong> 中的观看记录增量、自动同步到 <strong>豆瓣</strong>（标记「在看」与「看过」），零侵入安全只读。
-</p>
+<p align="center">把飞牛影视的观看记录自动同步到豆瓣，标记「在看」和「看过」。</p>
 
 ---
 
-## ✨ 核心特性
+## 它做什么
 
-- 🚀 **自动增量同步**：定时读取飞牛影视播放记录，通过豆瓣 API 自动标记状态。
-- 🎯 **智能分季匹配**：按季度与剧名从豆瓣搜索结果中挑选条目，第 2 季及以后匹配不到时宁可失败，不误标第 1 季。
-- 📺 **追剧状态机**：首集 →「在看」，完结 →「看过」，中间集跳过豆瓣请求，幂等防风控。
-- 🛡️ **安全只读机制**：使用临时数据库副本 + `mode=ro` 只读连接，绝不修改飞牛原始库。
-- 🧹 **进度阈值过滤**：支持自定义播放百分比门槛（默认 90%），防止随手点开导致误标。
-- ⏰ **双调度模式**：支持固定小时间隔与自定义 Cron 表达式。
-- 🔔 **Bark 实时推送**：状态变更精准通知，Cookie 过期主动预警。
-- 🌐 **响应式 Web 管理**：内置开箱即用的 Web 界面与 SSE 实时同步日志，无需外网 CDN。
+定时读取飞牛影视（FNTV）数据库中的播放记录，在豆瓣找到对应条目并标记状态：
 
----
+- **电影**：看完 → 看过
+- **剧集**：按季同步，开始看 → 在看，看完最后一集 → 看过
+- 飞牛数据库只读访问，不会被修改；只同步你在配置页选择的那一个飞牛用户
 
-## 🚀 快速开始 (Docker Compose)
+## 部署
 
-### 1. 编写 `docker-compose.yml`
+### 1. 创建 `docker-compose.yml`
 
 ```yaml
 services:
-  doubansync:
+  fntv-douban-sync:
     image: wastedwood/doubansync:latest
-    container_name: doubansync
+    container_name: fntv-douban-sync
     restart: unless-stopped
     ports:
       - "58080:5000"
     volumes:
-      # 飞牛数据库路径（只读挂载）
+      # 飞牛数据库（只读）。路径不同时只改冒号左侧
       - /usr/local/apps/@appdata/trim.media/database/trimmedia.db:/fntv-db/trimmedia.db:ro
-      # 状态数据持久化目录
+      # 同步状态与配置
       - ./sync_state:/app/sync_state
     environment:
       - TZ=Asia/Shanghai
 ```
 
-> **提示**：以上为飞牛影视数据库的默认位置，若你的路径不同，替换冒号左侧部分即可。
-
-### 2. 启动与配置
+### 2. 启动
 
 ```bash
 docker compose up -d
 ```
 
-1. 打开浏览器访问 `http://<NAS_IP>:58080` 进入配置页；
-2. 粘贴从浏览器提取的 **豆瓣 Cookie** 并选择要同步的飞牛用户；
-3. 保存后点击「立即同步」即可开始首次同步。
+### 3. 配置
 
----
+打开 `http://<NAS_IP>:58080/config`：
 
-## 📖 同步规则速查
+1. **FNTV 数据库**：保持默认路径，点「测试连接」，然后选择要同步的飞牛用户
+2. **豆瓣 Cookie**：粘贴后点「验证 Cookie」。获取方法见页面内的图文指南，简单说就是：电脑浏览器登录豆瓣 → F12 → Network → 刷新 → 复制请求头里的 `Cookie`
+3. **同步计划、播放阈值、Bark 推送**：按需调整，见下方配置项
+4. 保存，回到首页点「立即同步」完成首次同步
 
-| 类别 | 触发条件 | 豆瓣标记状态 |
-|------|----------|--------------|
-| **电影** | 飞牛标记「已看」或播放进度 ≥ 设定阈值 | `看过` (collect) |
-| **电视剧·首集** | 首次开始观看该季 | `在看` (do) |
-| **电视剧·中间集** | 观看进度推进 | 本地记录进度，**跳过豆瓣 API** |
-| **电视剧·完结** | 达到该季总集数或一次性看完 | `看过` (collect) |
+### 更新
 
----
+```bash
+docker compose pull && docker compose up -d
+```
 
-## ⚙️ 核心配置项
+## 同步规则
+
+| 类型 | 条件 | 豆瓣状态 |
+|------|------|----------|
+| 电影 | 飞牛标记已看，或播放进度 ≥ 阈值 | 看过 |
+| 剧集·开始看 | 该季首次同步且未看完 | 在看 |
+| 剧集·看到中间 | 进度推进 | 不请求豆瓣，只记录进度 |
+| 剧集·看完 | 看到该季最后一集（或首次同步时已看完） | 看过 |
+
+**多季剧集**：每季对应豆瓣上的独立条目，第 2 季及以后会搜索「剧名 第N季」，季度和剧名都对得上才标记。找不到时记为同步失败，不会误标到第一季，需在豆瓣手动标记。
+
+**不同步的内容**：第 0 季（特别篇）、播放进度低于阈值的记录、已标记看过的条目。
+
+## 配置项
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| **FNTV 数据库路径** | 容器内只读数据库文件路径 | `/fntv-db/trimmedia.db` |
-| **豆瓣 Cookie** | 从浏览器提取的完整 Cookie 字符串（包含 `dbcl2` 与 `ck`） | — |
-| **同步计划** | 间隔模式（每 N 小时）或 Cron 表达式（如 `0 3 * * *`） | 每 24 小时 |
-| **播放阈值** | 达到该播放百分比后才触发同步（0 为不限制） | 90% |
-| **仅自己可见** | 豆瓣标记是否设为私密 | 是 |
-| **Bark Key** | iOS Bark 推送设备 Key（留空禁用） | 空 |
+| FNTV 数据库路径 | 容器内路径，可用环境变量 `FNTV_DB_PATH` 覆盖 | `/fntv-db/trimmedia.db` |
+| 同步用户 | 只同步该飞牛用户的记录 | — |
+| 豆瓣 Cookie | 需包含 `dbcl2` 和 `ck` | — |
+| 同步计划 | 间隔模式（每 N 小时，1–168）或 Cron 表达式 | 每 24 小时 |
+| 播放阈值 | 播放进度达到该百分比才同步，0 为不限制 | 90% |
+| 仅自己可见 | 豆瓣标记是否私密 | 是 |
+| Bark Key | iOS Bark 推送，同步结果与 Cookie 过期提醒；留空不推送 | 空 |
 
----
+## 常见问题
 
-## 🗺️ 待办与规划 (TBD)
+- **Cookie 过期**：同步会失败，配置了 Bark 会收到提醒。按同样方法重新获取并保存即可。
+- **某部剧搜索失败**：豆瓣条目名与飞牛剧名差异较大时会搜不到。例如续作在豆瓣叫「马大帅2」而不是「马大帅 第二季」。在「同步日志」页查看失败项，到豆瓣手动标记。
+- **部分旧记录没有同步**：飞牛重新刮削后可能残留找不到所属剧集的单集记录，这类记录会被跳过。
 
-- [ ] **MoviePilot 插件适配**：提供独立插件包并发布至 MoviePilot 插件市场。
+## 本地开发
 
----
+```bash
+pip install -r requirements.txt
+python -m pytest -q    # 运行测试
+python -m app          # 启动开发服务器，http://localhost:5000
+```
 
-## 🤝 致谢
+运行时数据写在 `sync_state/`，可用环境变量 `SYNC_STATE_DIR` 指定其他目录。
 
-- 参考项目：[MoviePilot-Plugins/doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching) & [fntv-record-view](https://github.com/QiaoKes/fntv-record-view)
+## 致谢
+
+- [MoviePilot-Plugins/doubanwatching](https://github.com/honue/MoviePilot-Plugins/tree/main/plugins/doubanwatching)
+- [fntv-record-view](https://github.com/QiaoKes/fntv-record-view)
