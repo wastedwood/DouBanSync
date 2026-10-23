@@ -324,7 +324,7 @@ class SyncEngine:
         只在重新搜索能找到不同的目标季条目时才改标；找不到则保持原样，避免误伤。
         原先被误标的第一季条目不撤销，由用户自行核对。
         """
-        marker = f"season_subject_repair_v1:{user_guid}"
+        marker = f"season_subject_repair_v2:{user_guid}"
         if self._store.get_config(marker, "") == "1":
             return
 

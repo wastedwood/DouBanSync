@@ -95,6 +95,22 @@ class CandidateSelectionTests(unittest.TestCase):
         name, sid = DoubanClient._select_best_candidate(candidates, "曼达洛人", 1)
         self.assertEqual(sid, "1")
 
+    # 豆瓣实际搜索「马大帅 第二季」的结果
+    MADASHUAI = [
+        ("马大帅2", "4043850"),
+        ("马大帅", "2997297"),
+        ("马大帅3", "4044821"),
+        ("华灯初上 第二季", "35550794"),
+        ("寻找马大帅", "38365094"),
+    ]
+
+    def test_matches_sequel_named_with_trailing_number(self):
+        self.assertEqual(DoubanClient._select_best_candidate(self.MADASHUAI, "马大帅", 2)[1], "4043850")
+        self.assertEqual(DoubanClient._select_best_candidate(self.MADASHUAI, "马大帅", 3)[1], "4044821")
+
+    def test_first_season_skips_sequel_named_with_trailing_number(self):
+        self.assertEqual(DoubanClient._select_best_candidate(self.MADASHUAI, "马大帅", 1)[1], "2997297")
+
 
 class MarkInterestTests(unittest.TestCase):
     @staticmethod

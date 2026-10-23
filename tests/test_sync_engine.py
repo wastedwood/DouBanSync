@@ -194,7 +194,7 @@ class SeasonSubjectRepairTests(unittest.TestCase):
         self.client.mark_interest.return_value = False
         self.engine._repair_season_subjects("run", self.client, "u")
         self.assertEqual(self._sid("bcs-2"), "25726259")
-        self.assertNotEqual(self.store.get_config("season_subject_repair_v1:u"), "1")
+        self.assertNotEqual(self.store.get_config("season_subject_repair_v2:u"), "1")
 
 
 if __name__ == "__main__":

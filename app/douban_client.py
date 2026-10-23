@@ -180,11 +180,17 @@ class DoubanClient:
             cand = cand_clean.lower().strip()
             return bool(cand) and (clean_target in cand or cand in clean_target)
 
+        def sequel_number(name: str) -> int | None:
+            # 豆瓣续作常以「剧名+数字」命名（如「马大帅2」），只认剧名完全一致的
+            m = re.fullmatch(re.escape(clean_target) + r"\s*(\d{1,2})", name.lower().strip())
+            return int(m.group(1)) if m and int(m.group(1)) > 1 else None
+
         # 1) 第 2 季及以后：季度与剧名必须同时匹配，否则宁可失败也不误标第一季或其他剧
         if target_season and target_season > 1:
             for name, sid in candidates:
                 cand_clean, cand_season = extract_season_info(name)
-                if cand_season == target_season and title_matches(cand_clean):
+                if ((cand_season == target_season and title_matches(cand_clean))
+                        or sequel_number(name) == target_season):
                     return name, sid
             logger.warning("豆瓣搜索结果中未找到目标第 %d 季条目: search=%s 候选=%s",
                            target_season, clean_search_title, [c[0] for c in candidates[:3]])
@@ -192,7 +198,7 @@ class DoubanClient:
 
         # 2) 第一季、电影或未指定季度：排除第 2 季及以后，优先剧名一致的条目
         eligible = [(name, sid) for name, sid in candidates
-                    if (extract_season_info(name)[1] or 1) == 1]
+                    if (extract_season_info(name)[1] or 1) == 1 and not sequel_number(name)]
         for name, sid in eligible:
             if title_matches(extract_season_info(name)[0]):
                 return name, sid
