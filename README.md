@@ -35,21 +35,21 @@
 ```yaml
 services:
   doubansync:
-    image: ghcr.io/wastedwood/doubansync:latest
+    image: wastedwood/doubansync:latest
     container_name: doubansync
     restart: unless-stopped
     ports:
       - "58080:5000"
     volumes:
       # 飞牛数据库路径（只读挂载）
-      - /vol1/@apps/trimmedia/trimmedia.db:/fntv-db/trimmedia.db:ro
+      - /usr/local/apps/@appdata/trim.media/database/trimmedia.db:/fntv-db/trimmedia.db:ro
       # 状态数据持久化目录
       - ./sync_state:/app/sync_state
     environment:
       - TZ=Asia/Shanghai
 ```
 
-> **提示**：飞牛影视数据库通常位于 `/usr/local/apps/@appdata/trim.media/database/trimmedia.db`，若有权限问题请直接挂载该原路径。
+> **提示**：以上为飞牛影视数据库的默认位置，若你的路径不同，替换冒号左侧部分即可。
 
 ### 2. 启动与配置
 
