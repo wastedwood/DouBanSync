@@ -292,7 +292,8 @@ a:hover { color: #006c41; }
 .log-terminal div { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-time { color: #7f8ca1; }
 .log-mark_done { color: #45d99a; }
-.log-mark_doing { color: #6da2ff; }
+.log-mark_doing,
+.log-remove_wish { color: #6da2ff; }
 .log-skip_threshold,
 .log-skip_middle { color: #f4c45e; }
 .log-skip_done { color: #9aa7ba; }

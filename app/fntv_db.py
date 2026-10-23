@@ -245,6 +245,23 @@ class FntvDb:
         ).fetchone()
         return dict(row) if row else None
 
+    def get_library_titles(self, conn) -> list[dict]:
+        """库中所有电影 / 剧集：{title, original_title, imdb_id, seasons}，seasons 为挂有单集的季号集合"""
+        rows = conn.execute(
+            """SELECT item.guid, COALESCE(item.title, '') AS title,
+                      COALESCE(item.original_title, '') AS original_title,
+                      COALESCE(item.imdb_id, '') AS imdb_id
+               FROM item WHERE item.parent_guid IS NULL OR item.parent_guid = ''"""
+        ).fetchall()
+        seasons = {}
+        for row in conn.execute(
+            """SELECT season.parent_guid, season.season_number FROM item AS season
+               WHERE season.season_number > 0
+                 AND EXISTS (SELECT 1 FROM item AS ep WHERE ep.parent_guid = season.guid)"""
+        ):
+            seasons.setdefault(row["parent_guid"], set()).add(row["season_number"])
+        return [{**dict(r), "seasons": seasons.get(r["guid"], set())} for r in rows]
+
     def get_season_max_watched(self, conn, user_guid: str, season_guid: str) -> int:
         """获取用户在某季已看过的最大集号"""
         row = conn.execute(

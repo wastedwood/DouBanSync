@@ -111,6 +111,15 @@ class Config:
         self._store.set_config("private", "true" if value else "false")
 
     @property
+    def clean_wish(self) -> bool:
+        """同步时把飞牛库里已有的片子从豆瓣「想看」中移除，默认关闭"""
+        return self._store.get_config("clean_wish", "") == "true"
+
+    @clean_wish.setter
+    def clean_wish(self, value: bool):
+        self._store.set_config("clean_wish", "true" if value else "false")
+
+    @property
     def bark_key(self) -> str:
         return self._store.get_config("bark_key", "")
 
@@ -128,5 +137,6 @@ class Config:
             "sync_interval_hours": self.sync_interval_hours,
             "watch_threshold_percent": self.watch_threshold_percent,
             "private": self.private,
+            "clean_wish": self.clean_wish,
             "bark_key": self.bark_key,
         }

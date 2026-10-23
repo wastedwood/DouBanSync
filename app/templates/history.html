@@ -9,7 +9,7 @@
     </div>
 </header>
 
-{% set labels = {'mark_done':'已标记看过','mark_doing':'已标记在看','skip_threshold':'播放进度不足','skip_middle':'中间集已跳过','skip_special':'特别篇已跳过','repair_subject':'已修正多季条目','skip_done':'已同步','error_search':'搜索失败','error_api':'接口失败','auth_failed':'Cookie 失效','no_new_records':'没有新记录','all_filtered':'没有符合条件的记录','no_change_skip':'播放记录无变化'} %}
+{% set labels = {'mark_done':'已标记看过','mark_doing':'已标记在看','skip_threshold':'播放进度不足','skip_middle':'中间集已跳过','skip_special':'特别篇已跳过','repair_subject':'已修正多季条目','remove_wish':'已移出想看','skip_done':'已同步','error_search':'搜索失败','error_api':'接口失败','auth_failed':'Cookie 失效','no_new_records':'没有新记录','all_filtered':'没有符合条件的记录','no_change_skip':'播放记录无变化'} %}
 <section class="surface-card section-card" aria-label="同步日志列表">
     <div class="history-toolbar">
         <label class="visually-hidden" for="history-filter">结果筛选</label>
@@ -32,7 +32,7 @@
             <thead><tr><th>时间</th><th>结果</th><th>影视标题</th><th>处理说明</th></tr></thead>
             <tbody id="history-body">
                 {% for log in logs %}
-                {% set tone = 'success' if log.action in ['mark_done','mark_doing'] else 'warning' if log.action.startswith('skip') or log.action in ['no_new_records','all_filtered','no_change_skip'] else 'danger' %}
+                {% set tone = 'success' if log.action in ['mark_done','mark_doing','remove_wish'] else 'warning' if log.action.startswith('skip') or log.action in ['no_new_records','all_filtered','no_change_skip'] else 'danger' %}
                 <tr class="history-row" data-tone="{{ tone }}" data-title="{{ (log.series_title or '')|lower }}">
                     <td data-label="时间" class="text-nowrap">{% if log.created_at %}{{ log.created_at | timestamp_to_dt }}{% endif %}</td>
                     <td data-label="结果"><span class="badge-soft {{ tone }}">{{ labels.get(log.action, log.action) }}</span></td>

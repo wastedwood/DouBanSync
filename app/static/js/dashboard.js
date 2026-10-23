@@ -7,7 +7,7 @@
     if (!status || !livePanel || !logContainer) return;
 
     const labels = {
-        info: '提示', mark_done: '已标记看过', mark_doing: '已标记在看',
+        info: '提示', mark_done: '已标记看过', mark_doing: '已标记在看', remove_wish: '已移出想看',
         skip_threshold: '播放进度不足', skip_middle: '中间集跳过', skip_done: '已同步',
         error_search: '搜索失败', error_api: '豆瓣接口失败', auth_failed: 'Cookie 失效',
         no_new_records: '没有新记录', all_filtered: '没有符合条件的记录', no_change_skip: '播放记录无变化'

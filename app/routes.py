@@ -82,6 +82,7 @@ def config_page():
         except ValueError:
             pass
         cfg.private = request.form.get("private") == "on"
+        cfg.clean_wish = request.form.get("clean_wish") == "on"
         cfg.bark_key = request.form.get("bark_key", "")
         message = "配置已保存"
         # 重排定时任务

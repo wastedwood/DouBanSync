@@ -416,5 +416,57 @@ class SeasonPartsCompletionTests(unittest.TestCase):
         self.assertEqual((state["douban_subject_id"], state["status"]), ("33440021", "done"))
 
 
+class WishCleanupTests(unittest.TestCase):
+    # 飞牛库（实测数据节选）
+    LIBRARY = [
+        {"title": "赴汤蹈火", "original_title": "Hell or High Water", "imdb_id": "tt2582782", "seasons": set()},
+        {"title": "大理石厅谋杀案", "original_title": "Marble Hall Murders", "imdb_id": "", "seasons": {1}},
+        {"title": "信号", "original_title": "시그널", "imdb_id": "tt5332206", "seasons": {1}},
+        {"title": "无依之地", "original_title": "Nomadland", "imdb_id": "tt9770150", "seasons": set()},
+    ]
+
+    def test_match_by_imdb_or_title(self):
+        match = SyncEngine._match_library
+        self.assertEqual(match(["赴汤蹈火", "Hell or High Water"], "tt2582782", self.LIBRARY)["title"], "赴汤蹈火")
+        # 中文名不同，按原名匹配
+        self.assertEqual(match(["翠鸟谋杀案", "Marble Hall Murders"], "", self.LIBRARY)["title"],
+                         "大理石厅谋杀案")
+        # 同名但 IMDb 不同：不是同一部
+        self.assertIsNone(match(["无依之地", "Nomadland"], "tt0000001", self.LIBRARY))
+        self.assertIsNone(match(["野兽之心", "Heart of the Beast"], "tt1", self.LIBRARY))
+
+    def test_later_season_must_exist_in_library(self):
+        self.assertIsNone(SyncEngine._match_library(["信号 第二季", "시그널 시즌 2"], "tt5332206", self.LIBRARY))
+        self.assertIsNotNone(SyncEngine._match_library(["信号 第一季"], "tt5332206", self.LIBRARY))
+
+    def _engine(self, enabled):
+        store = MagicMock()
+        store.get_config.side_effect = lambda key, default="": "true" if enabled and key == "clean_wish" else default
+        fntv = MagicMock()
+        fntv.get_library_titles.return_value = self.LIBRARY
+        return SyncEngine(fntv, store, "ck=x"), store
+
+    def test_disabled_by_default(self):
+        engine, _ = self._engine(enabled=False)
+        client = MagicMock()
+        engine._clean_wish_list("run", client)
+        client.get_wish_list.assert_not_called()
+
+    def test_removes_only_wishes_in_library(self):
+        engine, store = self._engine(enabled=True)
+        client = MagicMock()
+        client.get_wish_list.return_value = [
+            {"sid": "26389148", "names": ["赴汤蹈火", "Hell or High Water"]},
+            {"sid": "36828393", "names": ["野兽之心", "Heart of the Beast"]},
+        ]
+        client.get_subject_imdb.side_effect = {"26389148": "tt2582782", "36828393": "tt99"}.get
+        client.remove_interest.return_value = True
+        engine._clean_wish_list("run", client)
+
+        client.remove_interest.assert_called_once_with("26389148")
+        store.log_action.assert_called_once_with("run", "remove_wish", "26389148", "赴汤蹈火",
+                                                 "飞牛库已有「赴汤蹈火」")
+
+
 if __name__ == "__main__":
     unittest.main()

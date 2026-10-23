@@ -240,6 +240,7 @@ class SyncEngine:
         # 首次升级后检查本地已完成条目，修复实际状态不一致的历史记录。
         self._repair_legacy_done(run_id, client, user_guid)
         self._repair_season_subjects(run_id, client, user_guid)
+        self._clean_wish_list(run_id, client)
 
         last_sync = int(self._store.get_config("last_sync_time", "0"))
         plays = self._fntv.get_new_plays(user_guid, last_sync)
@@ -445,6 +446,55 @@ class SyncEngine:
             self._store.set_config(marker, "1")
         logger.info("[%s] 多季豆瓣条目检查完成: 检查=%d 修复=%d 失败=%d",
                     run_id, checked, repaired, failed)
+
+    # ── 想看清理 ─────────────────────────────────────
+
+    @staticmethod
+    def _match_library(names: list[str], imdb_id: str, library: list[dict]) -> dict | None:
+        """在飞牛库中找豆瓣条目对应的电影 / 剧集
+
+        IMDb 一致优先；豆瓣没有 IMDb 或飞牛条目没有 IMDb 时按中文名 / 原名精确匹配。
+        豆瓣条目带第 2 季及以后的季号时，飞牛里必须有这一季。
+        """
+        season = next((s for _, s in map(extract_season_info, names) if s), None)
+        clean_names = {extract_season_info(n)[0].lower() for n in names}
+        for entry in library:
+            if imdb_id and entry["imdb_id"]:
+                matched = entry["imdb_id"] == imdb_id
+            else:
+                matched = bool(clean_names & {entry["title"].lower(), entry["original_title"].lower()} - {""})
+            if matched and (not season or season == 1 or season in entry["seasons"]):
+                return entry
+        return None
+
+    def _clean_wish_list(self, run_id: str, client: DoubanClient):
+        """豆瓣「想看」中已在飞牛库里的片子去掉想看标记（配置开关，默认关闭）
+
+        只处理想看列表里的条目，在看 / 看过不动。
+        """
+        if self._store.get_config("clean_wish", "") != "true":
+            return
+        wishes = client.get_wish_list()
+        if not wishes:
+            return
+        conn = self._fntv.get_conn()
+        try:
+            library = self._fntv.get_library_titles(conn)
+        finally:
+            conn.close()
+
+        removed = 0
+        for wish in wishes:
+            entry = self._match_library(wish["names"], client.get_subject_imdb(wish["sid"]), library)
+            if not entry:
+                continue
+            title = wish["names"][0]
+            if client.remove_interest(wish["sid"]):
+                self._log(run_id, "remove_wish", wish["sid"], title, f"飞牛库已有「{entry['title']}」")
+                removed += 1
+            else:
+                self._log(run_id, "error_api", wish["sid"], title, "移出想看失败")
+        logger.info("[%s] 想看清理完成: 想看=%d 移出=%d", run_id, len(wishes), removed)
 
     # ── 通知 ────────────────────────────────────────
 

@@ -92,6 +92,25 @@ class ItemClassificationTests(unittest.TestCase):
         self.assertEqual(fntv.get_season(self.conn, "aot", 4), {"guid": "s4", "title": "最终季"})
         self.assertIsNone(fntv.get_season(self.conn, "aot", 5))
 
+    def test_library_titles_list_movies_and_series_with_seasons(self):
+        self.conn.execute("ALTER TABLE item ADD COLUMN original_title TEXT")
+        self.conn.execute("ALTER TABLE item ADD COLUMN imdb_id TEXT")
+        rows = [
+            ("movie", None, None, None, "赴汤蹈火", "Hell or High Water", "tt2582782"),
+            ("tv", "", None, None, "信号", "시그널", None),
+            ("tv-s1", "tv", 1, 16, "第 1 季", None, None),
+            ("tv-s1-e1", "tv-s1", 1, 1, "", None, None),
+            ("tv-s2", "tv", 2, 16, "第 2 季", None, None),  # 没有单集，不算在库
+        ]
+        self.conn.executemany("INSERT INTO item VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+
+        fntv = FntvDb.__new__(FntvDb)
+        library = {e["title"]: e for e in fntv.get_library_titles(self.conn)}
+        self.assertEqual(set(library), {"赴汤蹈火", "信号"})
+        self.assertEqual(library["赴汤蹈火"]["imdb_id"], "tt2582782")
+        self.assertEqual(library["信号"]["seasons"], {1})
+        self.assertEqual(library["信号"]["imdb_id"], "")
+
     def test_season_total_uses_planned_episodes_for_ongoing_season(self):
         # 季节点的 episode_number 是刮削到的计划集数
         rows = [

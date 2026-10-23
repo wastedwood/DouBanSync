@@ -379,6 +379,86 @@ class DoubanClient:
             return None
         return None
 
+    # ── 想看 ─────────────────────────────────────────
+
+    @property
+    def user_id(self) -> str:
+        """当前登录用户 ID（dbcl2 形如 "12345:xxxx"）"""
+        return self._cookies.get("dbcl2", "").strip('"').split(":")[0]
+
+    def get_wish_list(self, max_pages: int = 50) -> list[dict] | None:
+        """读取「想看」列表，返回 [{sid, names}]（names 为「中文名 / 原名」拆开的各个片名），失败返回 None"""
+        if not self.user_id:
+            return None
+        headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "movie.douban.com"}
+        items, seen = [], set()
+        for _ in range(max_pages):
+            url = (f"https://movie.douban.com/people/{self.user_id}/wish"
+                   f"?start={len(items)}&sort=time&rating=all&filter=all&mode=list")
+            try:
+                resp = requests.get(url, headers=headers, timeout=15)
+            except Exception as e:
+                logger.error("读取豆瓣想看列表异常: %s", e)
+                return None
+            if resp.status_code != 200:
+                logger.warning("读取豆瓣想看列表失败 [%d]", resp.status_code)
+                return None
+            # 翻过最后一页时豆瓣会重复返回末页，没有新条目即结束
+            page = [item for item in self._parse_wish_list(resp.text) if item["sid"] not in seen]
+            if not page:
+                break
+            seen.update(item["sid"] for item in page)
+            items += page
+        return items
+
+    @staticmethod
+    def _parse_wish_list(html: str) -> list[dict]:
+        from bs4 import BeautifulSoup
+        items = []
+        for a_tag in BeautifulSoup(html, "lxml").select("li.item .title a"):
+            m = re.search(r"subject/(\d+)/", a_tag.get("href", ""))
+            names = [n.strip() for n in a_tag.get_text(" ", strip=True).split(" / ") if n.strip()]
+            if m and names:
+                items.append({"sid": m.group(1), "names": names})
+        return items
+
+    def get_subject_imdb(self, subject_id: str) -> str:
+        """读取条目页上的 IMDb 编号，没有或读取失败返回空串"""
+        try:
+            resp = requests.get(f"https://movie.douban.com/subject/{subject_id}/",
+                                headers=self._subject_headers(subject_id), timeout=15)
+        except Exception as e:
+            logger.error("读取豆瓣条目页异常 sid=%s: %s", subject_id, e)
+            return ""
+        m = re.search(r"IMDb:</span>\s*(tt\d+)", resp.text) if resp.status_code == 200 else None
+        return m.group(1) if m else ""
+
+    def remove_interest(self, subject_id: str) -> bool:
+        """删除条目的标记（条目页「删除这个收藏」），并核对已不再是想看"""
+        url = f"https://movie.douban.com/subject/{subject_id}/remove"
+        headers = self._subject_headers(subject_id)
+        for attempt in range(2):
+            try:
+                resp = requests.post(url, data={"ck": self._ck}, headers=headers,
+                                     timeout=10, allow_redirects=False)
+            except Exception as e:
+                logger.error("删除豆瓣标记异常 sid=%s: %s", subject_id, e)
+                return False
+            if resp.status_code == 403 and attempt == 0:
+                logger.warning("删除豆瓣标记返回403，刷新 ck 后重试")
+                self._refresh_ck()
+                headers["Cookie"] = self._make_cookie_header()
+                continue
+            break
+        if resp.status_code not in (200, 302):
+            logger.error("删除豆瓣标记失败 [%d] sid=%s", resp.status_code, subject_id)
+            return False
+        actual = self.get_interest_status(subject_id)
+        if actual == "wish":
+            logger.error("豆瓣标记未删除 sid=%s", subject_id)
+            return False
+        return True
+
     def _do_post(self, url: str, data: dict, headers: dict) -> bool:
         for attempt in range(2):
             try:

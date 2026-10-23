@@ -195,5 +195,56 @@ class MarkInterestTests(unittest.TestCase):
         post.assert_not_called()
 
 
+class WishListTests(unittest.TestCase):
+    # 豆瓣「想看」列表页（mode=list）的实际结构
+    PAGE = """<ul class="list-view">
+    <li class="item" id="list37214286"><div class="item-show"><div class="title">
+      <a href="https://movie.douban.com/subject/37214286/">
+        中头奖还是要上班 / 로또 1등도 출근합니다
+      </a></div></div></li>
+    <li class="item last" id="list34607563"><div class="item-show"><div class="title">
+      <a href="https://movie.douban.com/subject/34607563/">信号 第二季 / 시그널 시즌 2</a>
+    </div></div></li></ul>"""
+
+    def test_parse_wish_list(self):
+        self.assertEqual(DoubanClient._parse_wish_list(self.PAGE), [
+            {"sid": "37214286", "names": ["中头奖还是要上班", "로또 1등도 출근합니다"]},
+            {"sid": "34607563", "names": ["信号 第二季", "시그널 시즌 2"]},
+        ])
+
+    def test_user_id_from_dbcl2(self):
+        self.assertEqual(DoubanClient('ck=x; dbcl2="12345:abc"').user_id, "12345")
+
+    @patch("app.douban_client.requests.get")
+    def test_wish_list_stops_when_last_page_repeats(self, get):
+        # 翻过最后一页时豆瓣重复返回末页
+        get.return_value = Mock(status_code=200, text=self.PAGE)
+        items = DoubanClient('ck=x; dbcl2="12345:abc"').get_wish_list()
+        self.assertEqual([i["sid"] for i in items], ["37214286", "34607563"])
+        self.assertEqual(get.call_count, 2)
+        self.assertIn("start=2", get.call_args.args[0])
+
+    @patch("app.douban_client.requests.get")
+    def test_subject_imdb(self, get):
+        get.return_value = Mock(status_code=200, text='<span class="pl">IMDb:</span> tt2582782<br>')
+        self.assertEqual(DoubanClient("ck=x").get_subject_imdb("26389148"), "tt2582782")
+        get.return_value = Mock(status_code=200, text="<div></div>")
+        self.assertEqual(DoubanClient("ck=x").get_subject_imdb("26389148"), "")
+
+    @patch("app.douban_client.requests.get")
+    @patch("app.douban_client.requests.post")
+    def test_remove_interest_verifies_wish_is_gone(self, post, get):
+        post.return_value = Mock(status_code=302)
+        get.return_value = Mock(status_code=200)
+        get.return_value.json.return_value = {"interest_status": "wish"}
+        client = DoubanClient("ck=test; dbcl2=login")
+        self.assertFalse(client.remove_interest("123"))
+        self.assertEqual(post.call_args.args[0], "https://movie.douban.com/subject/123/remove")
+        self.assertEqual(post.call_args.kwargs["data"], {"ck": "test"})
+
+        get.return_value.json.return_value = {}
+        self.assertTrue(client.remove_interest("123"))
+
+
 if __name__ == "__main__":
     unittest.main()
