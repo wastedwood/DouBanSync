@@ -87,6 +87,8 @@ class DoubanClient:
     def __init__(self, cookie_str: str = ""):
         self._ck = ""
         self._cookies = {}
+        # 豆瓣暂时不可用（超时 / 连接失败 / 5xx / 429）的累计次数，同步引擎据此决定下次重试
+        self.error_count = 0
         if cookie_str:
             self._cookies = self._parse_cookie(cookie_str)
             self._ck = self._cookies.get("ck", "")
@@ -158,36 +160,74 @@ class DoubanClient:
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code != 200:
                 logger.warning("读取豆瓣条目摘要失败 [%d] sid=%s", resp.status_code, subject_id)
+                self._note_unavailable(resp.status_code)
                 return None
             return resp.json().get("subject") or None
         except Exception as e:
             logger.error("读取豆瓣条目摘要异常 sid=%s: %s", subject_id, e)
+            self._note_unavailable()
             return None
 
+    def _note_unavailable(self, status: int | None = None) -> bool:
+        """请求失败时调用：超时 / 连接失败（status 为 None）、5xx、429 记为暂时不可用"""
+        if status is None or status >= 500 or status == 429:
+            self.error_count += 1
+            return True
+        return False
+
     def _search_candidates(self, title: str) -> list[tuple[str, str]]:
+        candidates = self._search_page(title)
+        if candidates is None:
+            # 搜索页不可用时改用联想接口，结果仍按同样规则选条目
+            candidates = self._suggest_candidates(title)
+            logger.info("豆瓣搜索页不可用，联想接口返回 %d 个候选: %s", len(candidates), title)
+        return candidates
+
+    def _search_page(self, title: str) -> list[tuple[str, str]] | None:
+        """搜索页结果；搜索页暂时不可用时返回 None"""
         url = f"https://www.douban.com/search?cat=1002&q={requests.utils.quote(title)}"
         headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "www.douban.com"}
         try:
             resp = requests.get(url, headers=headers, timeout=15)
-            if resp.status_code != 200:
-                logger.warning("豆瓣搜索失败 [%d]: %s", resp.status_code, title)
-                return []
-            # 检查是否被重定向到登录页（精确匹配域名，避免误杀）
-            if any(d in resp.url.lower() for d in ["accounts.douban.com", "passport.douban"]):
-                logger.warning("搜索被重定向到登录页，Cookie 可能已过期: %s", title)
-                return []
-            # 验证码/空响应拦截
-            if len(resp.text) < 500 or "captcha" in resp.text.lower():
-                logger.warning("豆瓣搜索请求被拦截(status=%d, len=%d): %s",
-                               resp.status_code, len(resp.text), title)
-                return []
-            candidates = self._parse_search_results(resp.text)
-            if not candidates:
-                logger.debug("搜索无结果，响应前200字符: %s", resp.text[:200].strip())
-            return candidates
         except Exception as e:
-            logger.error("豆瓣搜索异常: %s", e)
+            logger.warning("豆瓣搜索异常: %s: %s", title, e)
+            self._note_unavailable()
+            return None
+        if resp.status_code != 200:
+            logger.warning("豆瓣搜索失败 [%d]: %s", resp.status_code, title)
+            return None if self._note_unavailable(resp.status_code) else []
+        # 检查是否被重定向到登录页（精确匹配域名，避免误杀）
+        if any(d in resp.url.lower() for d in ["accounts.douban.com", "passport.douban"]):
+            logger.warning("搜索被重定向到登录页，Cookie 可能已过期: %s", title)
             return []
+        # 验证码/空响应拦截
+        if len(resp.text) < 500 or "captcha" in resp.text.lower():
+            logger.warning("豆瓣搜索请求被拦截(status=%d, len=%d): %s",
+                           resp.status_code, len(resp.text), title)
+            return []
+        candidates = self._parse_search_results(resp.text)
+        if not candidates:
+            logger.debug("搜索无结果，响应前200字符: %s", resp.text[:200].strip())
+        return candidates
+
+    def _suggest_candidates(self, title: str) -> list[tuple[str, str]]:
+        """联想接口 subject_suggest 的影视条目（不含影人），失败返回空列表"""
+        url = f"https://movie.douban.com/j/subject_suggest?q={requests.utils.quote(title)}"
+        headers = {**BASE_HEADERS, "Cookie": self._make_cookie_header(), "Host": "movie.douban.com"}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                logger.warning("豆瓣联想搜索失败 [%d]: %s", resp.status_code, title)
+                self._note_unavailable(resp.status_code)
+                return []
+            items = resp.json()
+        except Exception as e:
+            logger.warning("豆瓣联想搜索异常: %s: %s", title, e)
+            self._note_unavailable()
+            return []
+        return [(item["title"], str(item["id"])) for item in items
+                if isinstance(item, dict) and item.get("type") == "movie"
+                and item.get("title") and item.get("id")]
 
     @staticmethod
     def _select_season_parts(candidates: list[tuple[str, str]], series_title: str,
@@ -349,6 +389,7 @@ class DoubanClient:
                 resp = requests.get(url, headers=headers, timeout=10)
             except Exception as e:
                 logger.error("读取豆瓣状态异常: %s", e)
+                self._note_unavailable()
                 return None
             if resp.status_code == 403 and attempt == 0:
                 logger.warning("读取豆瓣状态返回403，刷新 ck 后重试")
@@ -357,6 +398,7 @@ class DoubanClient:
                 continue
             if resp.status_code != 200:
                 logger.error("读取豆瓣状态失败 [%d]", resp.status_code)
+                self._note_unavailable(resp.status_code)
                 return None
             try:
                 data = resp.json()
@@ -465,6 +507,7 @@ class DoubanClient:
                 resp = requests.post(url, data=data, headers=headers, timeout=10)
             except Exception as e:
                 logger.error("请求异常: %s", e)
+                self._note_unavailable()
                 return False
             if resp.status_code == 403 and attempt == 0:
                 logger.warning("豆瓣 403，刷新 ck 后重试")
@@ -475,6 +518,7 @@ class DoubanClient:
             if resp.status_code == 200:
                 return self._parse_mark_response(resp.json())
             logger.error("豆瓣标记失败 [%d]: %s", resp.status_code, resp.text[:200])
+            self._note_unavailable(resp.status_code)
             return False
         return False
 

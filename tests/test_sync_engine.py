@@ -158,6 +158,7 @@ class PlayProgressTests(unittest.TestCase):
     def _run(self, client_cls, minutes, watched=0, item="movie-1", episode=None):
         client = client_cls.return_value
         client.check_auth.return_value = True
+        client.error_count = 0
         client.search_subject.return_value = ("片名", "100")
         client.mark_interest.reset_mock()
         client.mark_interest.return_value = True
@@ -194,6 +195,49 @@ class PlayProgressTests(unittest.TestCase):
         self.assertEqual(marks, [("100", "doing")])
         self.assertEqual(self.store.get_state("u", "ep-12")["max_ep_watched"], 11)
 
+    def _search_unavailable(self, client_cls):
+        client = client_cls.return_value
+
+        def search(title, season_number=None):
+            client.error_count += 1
+            return None, None
+        client.search_subject.side_effect = search
+
+    def test_douban_unavailable_retries_next_sync(self, client_cls):
+        self.fntv.classify_item.return_value = ItemCategory.MOVIE
+        self.store.set_config("last_sync_time", "5")
+        self._search_unavailable(client_cls)
+        self.assertEqual(self._run(client_cls, 95), [])
+        # 同步时间停在这条播放之前，不存指纹，下次重新处理
+        self.assertEqual(self.store.get_config("last_sync_time"), "95")
+        self.assertEqual(self.store.get_config("last_play_fingerprint"), "")
+        self.assertEqual(self.store.get_state("u", "movie-1")["status"], "failed")
+
+        client_cls.return_value.search_subject.side_effect = None
+        self.assertEqual(self._run(client_cls, 95), [("100", "done")])
+        self.assertEqual(self.store.get_config("last_sync_time"), "96")
+
+    def test_season_retries_next_sync_when_douban_unavailable(self, client_cls):
+        self.fntv.classify_item.return_value = ItemCategory.EPISODE
+        self.fntv.get_series_hierarchy.return_value = {
+            "series_guid": "tv", "season_guid": "s1", "season_number": 1,
+            "season_title": "第 1 季", "series_title": "某剧"}
+        self.fntv.get_season_total_episodes.return_value = 16
+        self.fntv.get_season_max_watched.return_value = 5
+        self._search_unavailable(client_cls)
+        self._run(client_cls, 95, item="ep-5", episode=5)
+        self.assertEqual(self.store.get_config("last_sync_time"), "95")
+
+        client_cls.return_value.search_subject.side_effect = None
+        self.assertEqual(self._run(client_cls, 95, item="ep-5", episode=5), [("100", "doing")])
+
+    def test_no_result_is_not_retried(self, client_cls):
+        self.fntv.classify_item.return_value = ItemCategory.MOVIE
+        client_cls.return_value.search_subject.side_effect = lambda *a, **k: (None, None)
+        self._run(client_cls, 95)
+        self.assertEqual(self.store.get_config("last_sync_time"), "96")
+        self.assertNotEqual(self.store.get_config("last_play_fingerprint"), "")
+
 
 # 豆瓣实测数据：搜索「剧名 季标题」的候选，以及各条目摘要
 DOUBAN_SEARCH = {
@@ -226,6 +270,7 @@ DOUBAN_ABSTRACT = {
 
 def douban_client_mock():
     client = MagicMock()
+    client.error_count = 0
     client.search_season_parts.side_effect = lambda series, tag: sorted(
         DOUBAN_SEARCH.get((series, tag), []), key=lambda c: int(c[1]))
     client.get_subject_abstract.side_effect = DOUBAN_ABSTRACT.get

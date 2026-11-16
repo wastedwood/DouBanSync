@@ -215,6 +215,34 @@ class WishListTests(unittest.TestCase):
     def test_user_id_from_dbcl2(self):
         self.assertEqual(DoubanClient('ck=x; dbcl2="12345:abc"').user_id, "12345")
 
+    SUGGEST = [
+        {"type": "celebrity", "title": "王家卫", "id": "1041024"},
+        {"type": "movie", "title": "重庆森林", "id": "1291999", "year": "1994"},
+    ]
+
+    @patch("app.douban_client.requests.get")
+    def test_search_falls_back_to_suggest_when_search_unavailable(self, get):
+        # 2026-11 豆瓣搜索页持续 503 / 超时，联想接口正常
+        suggest = Mock(status_code=200)
+        suggest.json.return_value = self.SUGGEST
+        for failure in (Mock(status_code=503, text="upstream connect error"),
+                        TimeoutError("read timed out")):
+            get.reset_mock()
+            get.side_effect = [failure, suggest]
+            client = DoubanClient("ck=x")
+            self.assertEqual(client.search_subject("重庆森林"), ("重庆森林", "1291999"))
+            self.assertIn("subject_suggest", get.call_args.args[0])
+            self.assertEqual(client.error_count, 1)
+
+    @patch("app.douban_client.requests.get")
+    def test_search_without_results_is_not_unavailable(self, get):
+        get.return_value = Mock(status_code=200, url="https://www.douban.com/search",
+                                text="<html>" + " " * 600 + "</html>")
+        client = DoubanClient("ck=x")
+        self.assertEqual(client.search_subject("不存在的片"), (None, None))
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(client.error_count, 0)
+
     @patch("app.douban_client.requests.get")
     def test_wish_list_stops_when_last_page_repeats(self, get):
         # 翻过最后一页时豆瓣重复返回末页

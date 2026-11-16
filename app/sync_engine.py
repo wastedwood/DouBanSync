@@ -56,6 +56,7 @@ class SyncEngine:
         self._running = False
         self._stats = {}
         self._summary_items = {}
+        self._retry_plays = []
 
     @property
     def is_running(self) -> bool:
@@ -222,6 +223,7 @@ class SyncEngine:
     def _do_run(self, user_guid: str) -> str:
         run_id = uuid.uuid4().hex[:12]
         self._stats = {"done": 0, "doing": 0, "failed": 0, "skipped": 0}
+        self._retry_plays = []
         self._summary_items = {key: [] for key, _ in SUMMARY_SECTIONS}
         logger.info("[%s] 同步开始 user=%s", run_id, user_guid)
         self._emit(run_id, "sync_start")
@@ -354,8 +356,13 @@ class SyncEngine:
                                    group["info"], group["plays"],
                                    is_inferred=group["is_inferred"])
 
-        # 更新同步时间戳和指纹
+        # 更新同步时间戳和指纹；豆瓣暂时不可用导致的失败，时间戳停在最早一条之前、不存指纹，下次重试
         max_time = max(p["play_update_time"] for p in plays)
+        if self._retry_plays:
+            max_time = min(p["play_update_time"] for p in self._retry_plays) - 1
+            fp = ""
+            logger.warning("[%s] 豆瓣暂时不可用，%d 条播放记录下次同步重试",
+                           run_id, len(self._retry_plays))
         self._store.set_config("last_sync_time", str(max_time))
         self._store.set_config("last_play_fingerprint", fp)
 
@@ -530,6 +537,14 @@ class SyncEngine:
         body = self._build_summary_body(self._stats, self._summary_items)
         self._notifier.send(title, body)
 
+    def _failure_detail(self, client: DoubanClient, errors_before: int,
+                        plays: list, detail: str) -> str:
+        """失败期间豆瓣暂时不可用（超时 / 5xx）时，记下这些播放留待下次重试"""
+        if client.error_count <= errors_before:
+            return detail
+        self._retry_plays.extend(plays)
+        return "豆瓣暂时不可用，下次同步重试"
+
     # ── 电影 ─────────────────────────────────────────
 
     def _process_movie(self, run_id: str, client: DoubanClient,
@@ -549,6 +564,7 @@ class SyncEngine:
             self._stats["skipped"] += 1
             return
 
+        errors = client.error_count
         sid = state.get("douban_subject_id") if state else None
         if not sid:
             _, sid = client.search_subject(title)
@@ -557,7 +573,8 @@ class SyncEngine:
             self._store.upsert_state(user_guid, item_guid, media_type="movie",
                                      status="failed",
                                      play_update_time=play["play_update_time"])
-            self._log(run_id, "error_search", item_guid, title, "豆瓣搜索无结果")
+            self._log(run_id, "error_search", item_guid, title,
+                      self._failure_detail(client, errors, [play], "豆瓣搜索无结果"))
             self._stats["failed"] += 1
             return
 
@@ -575,7 +592,7 @@ class SyncEngine:
                                      media_type="movie", status="failed",
                                      play_update_time=play["play_update_time"])
             self._log(run_id, "error_api", item_guid, title,
-                      f"标记失败 sid={sid}")
+                      self._failure_detail(client, errors, [play], f"标记失败 sid={sid}"))
             self._stats["failed"] += 1
 
     # ── 电视剧 ───────────────────────────────────────
@@ -616,6 +633,7 @@ class SyncEngine:
             return
 
         # 搜索豆瓣
+        errors = client.error_count
         season_title = info.get("season_title") or ""
         parts = []
         for play in plays:
@@ -644,7 +662,7 @@ class SyncEngine:
                                              episode_number=play.get("episode_number"),
                                              play_update_time=play["play_update_time"])
                 self._log(run_id, "error_search", series_guid, search_title,
-                          "豆瓣搜索无结果")
+                          self._failure_detail(client, errors, plays, "豆瓣搜索无结果"))
                 self._stats["failed"] += 1
                 return
         subject_id = parts[0][0]
@@ -690,7 +708,8 @@ class SyncEngine:
                                              total_episodes=total_eps,
                                              play_update_time=play["play_update_time"])
                 self._log(run_id, "error_api", series_guid, series_title,
-                          f"标记{interest}失败 sid={subject_id}")
+                          self._failure_detail(client, errors, plays,
+                                               f"标记{interest}失败 sid={subject_id}"))
                 logger.error("[%s] 豆瓣标记[%s]失败: %s", run_id, interest, series_title)
                 self._stats["failed"] += 1
                 return
